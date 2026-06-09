@@ -32,8 +32,21 @@ Tất cả thay đổi đáng chú ý của codebase Parley. Định dạng theo
     `max_warm_turns_per_phase` (mặc định 20 → re-seed full context, không delta).
   - Hòa giải ADR-15: warm chỉ áp profile primary; mọi fallback → drop session.
 
+### Fixed (live-smoke findings, xem BACKLOG.md)
+- **Parser khoan dung số dấu góc** (`protocol.py`): codex gpt-5.5 thỉnh thoảng emit thẻ mở
+  rớt dấu (`slice="...">` thay vì `>>>`) → trước đây `protocol.parse` ra NONE → advisor stuck.
+  Nới `_HEAD/_END/_REPORT` thành `<{2,3}...>{1,3}`. Verify trên raw log thật (NONE → DISPATCH).
+- **Prompt file vào workspace** (`channel.write_prompt`): trước ghi `~/.parley/data/.../prompts`
+  (ngoài project_dir) → sandbox provider (claude/cursor) không đọc được → `missing_report`.
+  Nay materialize thêm bản trong `<project_dir>/.parley/prompts/` (path trao cho executor);
+  giữ bản audit ở data_dir. `.gitignore` chặn `.parley/`.
+- **Notify goal lẻ** (`notify._tick_push`): trước chỉ duyệt `contract.goal_ids` → goal chạy lẻ
+  qua `/goals/{gid}/run` không bao giờ push Telegram. Nay union với `store.list_goals(pid)`.
+
 ### Notes
-- ADR-13 và ADR-15 đã live smoke. ADR-14 mới verify bằng unit test (chưa live smoke do
-  provider hết quota); `warm_until_task_done` cho role B và ADR-16 (memory ledger /
-  agentmemory) là đợt sau.
-- Full unit suite: 158/158 xanh.
+- ADR-13 và ADR-15 đã live smoke (parser/preflight/fallback/notify xác nhận thật). ADR-14 mới
+  verify bằng unit test (chưa live smoke do provider hết quota); `warm_until_task_done` cho role
+  B và ADR-16 (memory ledger / agentmemory) là đợt sau.
+- OPEN từ live smoke (BACKLOG): kiro read-only roles thiếu `--trust-tools=` (LS-017), claude opus
+  `-p` timeout 0-byte (LS-018), observability PID + live tail (LS-019).
+- Full unit suite: 160/160 xanh.

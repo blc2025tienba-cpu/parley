@@ -249,7 +249,8 @@ class Harness:
             self.slice_task[d.slice] = task_id
             report_path = f"docs/reports/phase{phase}-slice-{d.slice}-{d.role}-report.md"
             prompt_snap = ch.write_prompt(task_id, context.role_prompt_document(
-                d, contract, cfg.project_dir, cfg.contract_path, report_path, task_id))
+                d, contract, cfg.project_dir, cfg.contract_path, report_path, task_id),
+                project_dir=cfg.project_dir)
             ch.emit("gov", verdict=dec.verdict, reason=dec.reason)
             ch.emit("dispatch", phase=phase, turn=self.turn, role=d.role, slice=d.slice,
                     prompt=d.prompt, proposed_by="advisor", authorized_by="supervisor",

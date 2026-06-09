@@ -292,9 +292,16 @@ class NotifierWorker(threading.Thread):
             pid = project["id"]
             run = project.get("run") or {}
             gids = (project.get("contract") or {}).get("goal_ids") or []
-            # 1) events của các goal trong contract (active + vừa terminal)
+            # 1) events của các goal trong contract (active + vừa terminal) HOẶC goal lẻ
+            # (chạy thẳng qua /goals, không thuộc contract). Trước đây chỉ duyệt contract
+            # -> goal lẻ không bao giờ được push (BACKLOG). Union để bắt cả hai.
+            try:
+                standalone = [g["id"] for g in self.store.list_goals(pid)]
+            except Exception:
+                standalone = []
+            push_gids = list(dict.fromkeys(list(gids) + standalone))   # giữ thứ tự, bỏ trùng
             last_emit = self._state.setdefault("proj", {}).setdefault(pid, {})
-            for gid in gids:
+            for gid in push_gids:
                 g = self.store.get_goal(gid)
                 if not g:
                     continue

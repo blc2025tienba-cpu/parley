@@ -93,11 +93,21 @@ class Channel:
         dst.write_bytes(data)
         return Snap(str(dst), sha)
 
-    def write_prompt(self, task_id: str, content: str) -> Snap:
-        dst = self.dir / "prompts" / f"{task_id}.md"
-        dst.write_text(content, encoding="utf-8")
-        sha = hashlib.sha256(dst.read_bytes()).hexdigest()
-        return Snap(str(dst.resolve()), sha)
+    def write_prompt(self, task_id: str, content: str, project_dir: str | None = None) -> Snap:
+        """Materialize the role prompt. Always keep an audit copy in data_dir. When
+        project_dir is given, ALSO write a copy inside it (`.parley/prompts/`) and return
+        THAT path: sandboxed providers (claude/cursor) can only read files within the
+        workspace (project_dir), so a data_dir path (~/.parley/data/...) is unreadable to
+        them -> missing_report. The in-workspace copy is the path handed to the executor."""
+        audit = self.dir / "prompts" / f"{task_id}.md"
+        audit.write_text(content, encoding="utf-8")
+        sha = hashlib.sha256(audit.read_bytes()).hexdigest()
+        if project_dir:
+            local = Path(project_dir) / ".parley" / "prompts" / f"{task_id}.md"
+            local.parent.mkdir(parents=True, exist_ok=True)
+            local.write_text(content, encoding="utf-8")
+            return Snap(str(local.resolve()), sha)
+        return Snap(str(audit.resolve()), sha)
 
     def tail(self, n: int = 20) -> list:
         if not self.conv.exists():

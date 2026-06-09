@@ -46,6 +46,23 @@ class TestParseDirective(unittest.TestCase):
              "\x1b[38;5;8m Credits: 0.14 \x1b[0m\n")
         self.assertEqual(p.parse(s, self.N).kind, "COMPLETE")
 
+    def test_tolerates_dropped_closing_angles(self):
+        # Real case: codex (gpt-5.5) emitted the DISPATCH head closing with a single
+        # '>' instead of '>>>' while END kept '>>>'. Parser must still recognize it
+        # (the LM tends to drop *repeated* chars, not the keyword). See BACKLOG.
+        s = (f'<<<DISPATCH nonce="{self.N}" role="analyzer" slice="s1">\n'
+             "body\n"
+             f'<<<END nonce="{self.N}">>>\n')
+        d = p.parse(s, self.N)
+        self.assertEqual(d.kind, "DISPATCH")
+        self.assertEqual((d.role, d.slice, d.prompt), ("analyzer", "s1", "body"))
+
+    def test_tolerates_dropped_angles_on_complete_and_end(self):
+        # COMPLETE with a single closer, and a DISPATCH whose END dropped angles too.
+        self.assertEqual(p.parse(f'<<<COMPLETE nonce="{self.N}">', self.N).kind, "COMPLETE")
+        s = f'<<<DISPATCH nonce="{self.N}" role="coder" slice="s2">>\nb\n<<<END nonce="{self.N}">\n'
+        self.assertEqual(p.parse(s, self.N).kind, "DISPATCH")
+
 
 class TestParseReport(unittest.TestCase):
     def test_report_approve(self):

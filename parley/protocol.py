@@ -10,9 +10,13 @@ from dataclasses import dataclass
 
 _ANSI = re.compile(r"\x1b\[[0-9;?]*[A-Za-z]")
 _ATTR = re.compile(r'(\w+)="([^"]*)"')
-_HEAD = re.compile(r"^[ \t]*<<<(DISPATCH|PHASE|VERIFY|COMPLETE)\b([^\n>]*)>>>\s*$", re.M)
-_END = re.compile(r"^[ \t]*<<<END\b([^\n>]*)>>>\s*$", re.M)
-_REPORT = re.compile(r"^[ \t]*<<<REPORT\b([^\n>]*)>>>\s*$", re.M)
+# Delimiters tolerate 2-3 opening '<' and 1-3 closing '>': gpt-5.5 sometimes emits a
+# malformed closer (e.g. `slice="...">` instead of `>>>`) — dropping repeated chars is
+# a common LM slip. Anchored to the whole line + a keyword after '<<<', so code like
+# `cout << x` or a stray '>' in prose can't false-match. (ADR-15 follow-up; codex#27185.)
+_HEAD = re.compile(r"^[ \t]*<{2,3}(DISPATCH|PHASE|VERIFY|COMPLETE)\b([^\n<>]*)>{1,3}\s*$", re.M)
+_END = re.compile(r"^[ \t]*<{2,3}END\b([^\n<>]*)>{1,3}\s*$", re.M)
+_REPORT = re.compile(r"^[ \t]*<{2,3}REPORT\b([^\n<>]*)>{1,3}\s*$", re.M)
 
 
 def strip_ansi(s: str) -> str:

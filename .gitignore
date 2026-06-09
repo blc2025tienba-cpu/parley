@@ -15,6 +15,10 @@ __pycache__/
 # Local registry/data home (if pointed inside repo)
 /data/
 
+# ADR bridge: harness materializes role prompts in-workspace so sandboxed
+# providers (claude/cursor) can read them. Runtime scratch, never committed.
+.parley/
+
 # Editor / OS
 .DS_Store
 Thumbs.db

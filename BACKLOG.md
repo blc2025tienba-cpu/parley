@@ -31,6 +31,21 @@ Trạng thái: `OPEN` (chưa xử lý) · `FIXED` (đã sửa) · `MITIGATED` (g
 - **Phát hiện**: unit test ADR-14 — codex `--json` bọc directive trong JSONL (newline escape), `protocol.parse` trên raw → NONE.
 - **Sửa**: warm+codex unwrap `parse_jsonl → reply` (newline thật) cho downstream; classify vẫn chạy raw.
 
+### LS-008 · Codex emit directive rớt dấu `>` → NONE (FIXED 2026-06-09)
+- **Phát hiện**: live smoke goal_5d770bff — raw log cho thấy codex chạy XONG, ra đầy đủ directive + `<<<END>>>`, nhưng thẻ mở kết thúc bằng MỘT `>` (`slice="...">`) thay vì `>>>`. `protocol.parse` (regex cứng `>>>`) → NONE. KHÔNG phải lỗi timeout/reconnect như chẩn đoán ban đầu.
+- **Nguyên nhân thật**: gpt-5.5 hay rớt ký tự LẶP (`>>>`→`>`); `Reconnecting N/5` (SSE retry, codex#27185) là hiện tượng song song, không phải nguyên nhân NONE.
+- **Sửa**: nới 3 regex `_HEAD/_END/_REPORT` → `<{2,3}...>{1,3}` (khoan dung số dấu góc, neo cả dòng nên ~0 false-match). Verify trên raw log thật: NONE → DISPATCH. Test cũ `<<<>>>` vẫn khớp + 2 test rớt-dấu mới.
+- **Token có tên** (`[[PARLEY:...]]` thay `<<<>>>`) ghi nhận là cải tiến tương lai (robust hơn với LM rớt ký tự) nhưng cần đo LM-compliance + đổi mọi builder/test → ADR riêng.
+
+### LS-011 · Goal lẻ (ngoài contract) không push Telegram (FIXED 2026-06-09)
+- **Phát hiện**: goal chạy qua `/goals/{gid}/run` đứng một mình → `_tick_push` chỉ duyệt `contract.goal_ids` → không push.
+- **Sửa**: `_tick_push` union `contract.goal_ids ∪ store.list_goals(pid)` cho phần push events (giữ contract-only cho transition i/n). Live verify: goal lẻ goal_2859b601 → topic 4779 tạo, push tới event cuối.
+
+### LS-016 · Prompt file ở data_dir → sandbox provider (claude/cursor) không đọc được (FIXED 2026-06-09)
+- **Phát hiện**: live smoke — analyzer fallback claude báo `permissions error ... cannot read PROMPT_PATH C:\Users\MYPC\.parley\data\...\prompts\task.md` → `missing_report`.
+- **Nguyên nhân**: `write_prompt` ghi vào `data_dir` (`~/.parley/data/...`) NGOÀI project_dir; claude/cursor sandbox chỉ đọc trong workspace. Report files dùng path relative project_dir nên không bị (bất đối xứng).
+- **Sửa**: `write_prompt(.., project_dir=)` materialize prompt vào `<project_dir>/.parley/prompts/` (trong workspace) và trả path đó cho executor; vẫn giữ bản audit ở data_dir. `.gitignore` chặn `.parley/`. Live verify: kiro đọc được ("Successfully read 1213 bytes").
+
 ---
 
 ## Giảm thiểu (MITIGATED)
@@ -48,10 +63,20 @@ Trạng thái: `OPEN` (chưa xử lý) · `FIXED` (đã sửa) · `MITIGATED` (g
 - **Phát hiện**: 2 lần thử goal research đều không chạy tới warm turn (codex flaky + provider hết quota).
 - **Cần**: provider hồi quota → chạy goal nhiều turn, xác nhận turn-2 token (warm delta) < turn-1 (cold seed), `session_ref` giữ qua turn, force-cold đúng khi chạm `max_warm_turns_per_phase`.
 
-### LS-008 · Codex (gpt-5.5) flaky: `Reconnecting... 5/5` → turn_error NONE
-- **Phát hiện**: live smoke goal_5d770bff — advisor codex reconnect 5 lần mỗi turn, output méo → `protocol.parse` ra NONE, goal stuck sau `max_turn_errors`.
-- **Bản chất**: sự cố mạng/codex bên ngoài, KHÔNG kích hoạt fallback (đúng thiết kế: chỉ họ-quota mới fallback).
-- **Cần cân nhắc**: có nên coi reconnect-fail là transient → retry/fallback? Hiện chưa. Theo dõi tần suất.
+### LS-017 · Kiro read-only roles thiếu `--trust-tools=` → chết khi cần tool
+- **Phát hiện**: live smoke goal_2859b601 — analyzer (kiro) đọc được prompt, nhưng khi cần tool: `error: Tool approval required but --no-interactive was specified. Use --trust-all-tools`.
+- **Nguyên nhân**: `default_roles()` analyzer/architect/researcher cmd = `kiro-cli chat --no-interactive --agent <role>` — KHÔNG có `--trust-tools=`/`--trust-all-tools`. Supervisor có `--trust-tools=` (judge không cần tool); read-only roles cần `fs_read`/grep để khảo sát → bị chặn. Sẽ chết KỂ CẢ khi không rate-limit.
+- **Cần (quyết định bảo mật)**: read-only roles chỉ cần đọc → thêm `--trust-tools=fs_read` (hoặc tool an toàn cụ thể), KHÔNG `--trust-all-tools` (read-only role không nên ghi/shell). Coder/fixer (edit) cần scope rộng hơn — đã có chain riêng. Cần chốt tool-set cho từng tier.
+
+### LS-018 · Claude opus `-p` timeout 0-byte với workload reasoning lớn
+- **Phát hiện**: live smoke — analyzer-02/03-claude-opus-4.8 = 0 byte, reason=timeout. Opus `-p` không stream, reasoning (phân tích cả codebase + repo ngoài) >15ph → hard_timeout 900s kill trước khi in → 0 byte → missing_report → chain claude tiếp.
+- **Bản chất**: giới hạn thời gian/tài nguyên + opus không stream từng phần. Không phải lỗi logic.
+- **Cần cân nhắc**: (a) tăng hard_timeout cho read-only analysis role; (b) `--output-format stream-json` nếu claude hỗ trợ để có partial output (gắn với LS-019 observability); (c) chia nhỏ task analyzer.
+
+### LS-019 · Thiếu observability cho process task đang chạy (PID + live tail)
+- **Phát hiện**: khi claude chạy 15ph im lặng, không phân biệt được "đang làm việc" vs "treo"; attempt log chỉ ghi SAU khi xong (0 byte nếu timeout → vô dụng để theo dõi live). UI fallback không show pid.
+- **Đề xuất (user)**: nhận dạng mỗi process qua **PID** + emit lên event; **ghi temp log streaming** mỗi process; **tail log → UI show last-line + timestamp** để theo dõi real-time.
+- **Cần**: sửa `backends._spawn` ghi stdout streaming ra temp file (không chỉ buffer in-memory); emit `pid` trong dispatch/fallback event; notify/UI đọc tail. Việc đáng kể, làm riêng.
 
 ### LS-009 · Prompt tiếng Việt bị mojibake trong stdin codex
 - **Phát hiện**: raw log advisor — `Khảo sát` → `Kháº£o sÃ¡t` trong stdin codex (encoding Windows).
@@ -61,11 +86,6 @@ Trạng thái: `OPEN` (chưa xử lý) · `FIXED` (đã sửa) · `MITIGATED` (g
 - **Phát hiện**: khi set `max_turns` qua API, config bị ghi đè chỉ còn `{limits}` — mất `roles`/`advisor_cmd`/`fallbacks`.
 - **Tác động**: re-run goal fail (`KeyError: roles`). Phải rebuild config thủ công.
 - **Cần**: endpoint PUT config nên **merge** thay vì replace, hoặc validate đủ key bắt buộc.
-
-### LS-011 · Goal lẻ (ngoài contract) không push Telegram
-- **Phát hiện**: goal chạy qua `/goals/{gid}/run` đứng một mình → notifier `_tick_push` chỉ duyệt `contract.goal_ids` → không push.
-- **Tác động**: goal lẻ không có thông báo Telegram (chỉ goal trong contract mới push).
-- **Cần (nếu muốn)**: cho `_tick_push` duyệt cả goal `running` ngoài contract.
 
 ### LS-012 · `project_init` self-copy crash khi project_dir == repo Parley
 - **Phát hiện**: tạo project trỏ vào chính `D:\Projects\Parley` → `sync_agents` copy `.kiro/agents` đè lên chính nó → `SameFileError`.
