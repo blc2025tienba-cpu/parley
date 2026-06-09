@@ -1,0 +1,377 @@
+﻿<!doctype html>
+<html lang="vi">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Parley Console</title>
+<style>
+  :root{--bg:#0b0e14;--pan:#11161f;--line:#1f2937;--fg:#cbd5e1;--mut:#9ca3af;--acc:#93c5fd}
+  *{box-sizing:border-box} body{margin:0;font:13px/1.5 ui-monospace,Consolas,monospace;background:var(--bg);color:var(--fg)}
+  header{padding:8px 12px;background:var(--pan);border-bottom:1px solid var(--line);display:flex;gap:8px;align-items:center}
+  input,button,textarea{font:inherit;background:#1f2937;color:#e5e7eb;border:1px solid #374151;border-radius:4px;padding:4px 8px}
+  button{cursor:pointer} button:hover{border-color:var(--acc)}
+  .cols{display:grid;grid-template-columns:200px 250px 1fr 280px;height:calc(100vh - 45px)}
+  .col{border-right:1px solid var(--line);overflow:auto;padding:8px}
+  h3{margin:4px 0 8px;color:var(--mut);font-size:12px;text-transform:uppercase;letter-spacing:.05em}
+  .item{padding:6px 8px;border:1px solid var(--line);border-radius:5px;margin-bottom:6px;cursor:pointer}
+  .item:hover{border-color:var(--acc);background:#0f1623}
+  .item.sel{border-color:var(--acc);background:#0f1623}
+  #goals .item.sel{position:relative;border-color:#60a5fa;background:#102039;box-shadow:inset 3px 0 0 #60a5fa,0 0 0 1px rgba(96,165,250,.18)}
+  #goals .item.sel .ttl{color:#eff6ff}
+  #goals .item.sel .desc{color:#bfdbfe}
+  .desc{font-size:11px;color:var(--mut);margin-top:3px;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+  .diag{border:1px solid var(--line);border-radius:6px;padding:7px;margin:6px 0 8px;font-size:11px;color:var(--mut)}
+  .diag .warn{color:#fbbf24}.diag .bad{color:#fca5a5}.diag .ok{color:#86efac}
+  .row{display:flex;gap:6px;margin:6px 0;flex-wrap:wrap} .row>input{flex:1;min-width:60px}
+  .st{font-size:11px;color:var(--mut)} .badge{font-size:10px;padding:1px 6px;border-radius:8px;background:#1f2937}
+  .running{color:#fde68a}.done{color:#34d399}.stopped,.stopping{color:#fca5a5}.idle{color:var(--mut)}
+  .tk{padding:5px 7px;border:1px solid var(--line);border-radius:5px;margin-bottom:5px;cursor:pointer}
+  #tasks .tk:nth-child(odd){background:#0d131d}
+  #tasks .tk:nth-child(even){background:#111a27}
+  .tk:hover{border-color:var(--acc);background:#13243a}
+  .tk.sel{border-color:#60a5fa;background:#102039;box-shadow:inset 3px 0 0 #60a5fa}
+  .tk.emergent{border-left:3px solid #fb923c} .tk .meta{font-size:10px;color:var(--mut)}
+  .tk .prov{font-size:10px;color:#93c5fd;margin-top:2px}
+  .tk .att{margin-top:4px;border-top:1px solid var(--line);padding-top:3px}
+  .tk .attrow{display:grid;grid-template-columns:16px 1fr auto;gap:6px;font-size:10px;padding:1px 0;color:var(--mut)}
+  .tk .attrow .bad{color:#fca5a5}.tk .attrow .ok{color:#86efac}
+  .initp{border:1px solid var(--line);border-radius:6px;padding:6px;margin-bottom:8px}
+  #contract>div{padding:1px 0;font-size:11px}
+  .chatwrap{max-height:62vh;overflow:auto;padding:6px;display:flex;flex-direction:column;gap:6px;border:1px solid var(--line);border-radius:8px;margin-bottom:6px}
+  .bub{max-width:80%;padding:6px 10px;border-radius:12px;white-space:pre-wrap;font-size:12px;line-height:1.45}
+  .bub.user{align-self:flex-end;background:#1d4ed8;color:#fff;border-bottom-right-radius:3px}
+  .bub.adv{align-self:flex-start;background:#1f2937;border:1px solid #374151;border-bottom-left-radius:3px}
+  .bub .nm{font-size:10px;color:#93a4bd;margin-bottom:2px}
+  .overlay{position:fixed;inset:0;background:rgba(0,0,0,.6);display:flex;align-items:center;justify-content:center;z-index:10}
+  .modal{background:var(--pan);border:1px solid var(--line);border-radius:8px;padding:14px;width:540px;max-width:92vw}
+  .fsd{padding:4px 8px;border-bottom:1px solid #161c26;cursor:pointer} .fsd:hover{background:#0f1623}
+  #feed .ev{padding:7px 9px;border-bottom:1px solid #1f2937;border-left:2px solid transparent;font-size:12px}
+  #feed .ev:nth-child(odd){background:#0d131d}
+  #feed .ev:nth-child(even){background:#111a27}
+  #feed .ev:hover{background:#13243a;border-left-color:#60a5fa}
+  #feed .hd{display:flex;gap:8px;align-items:baseline;margin-bottom:2px}
+  #feed .t{color:#6b7280;font-size:11px}
+  #feed .who{font-weight:bold}
+  #feed .body{white-space:pre-wrap;color:#cbd5e1}
+  .advisor .who{color:#93c5fd}.dispatch .who{color:#c4b5fd}.report .who{color:#86efac}.verify .who{color:#fde68a}.gov .who{color:#c4b5fd}
+  .turn_error .who{color:#fca5a5}.slice_done .who{color:#34d399}.phase_start .who,.phase_end .who{color:#f9a8d4}
+  .user_goal .who{color:#fbbf24}
+  .housekeeping .who{color:#5eead4}.push .who{color:#34d399}
+  .ntf{border:1px solid var(--line);border-radius:6px;padding:6px 8px;margin-bottom:8px}
+  .ntf-hd{font-size:11px;color:var(--mut);text-transform:uppercase;letter-spacing:.05em;margin-bottom:5px;display:flex;gap:6px;align-items:center}
+  .ntf-row{display:flex;gap:6px;align-items:center;margin:4px 0;font-size:12px}
+  .ntf .badge.ok{background:#064e3b;color:#86efac}.ntf .badge.bad{background:#4c1d1d;color:#fca5a5}.ntf .badge.off{background:#1f2937;color:var(--mut)}.ntf .badge.warn{background:#422006;color:#fbbf24}
+  textarea{width:100%;height:240px;white-space:pre} .muted{color:var(--mut)}
+  #draftGoals{height:120px}
+  #draftReason{width:100%}
+  #artifactBody{height:150px}
+</style></head>
+<body>
+<header>
+  <strong>Parley Console</strong>
+  <input id="tok" type="password" placeholder="bearer token" size="22">
+  <button onclick="saveTok()">save token</button>
+  <span id="who" class="st"></span>
+</header>
+<div class="cols">
+  <div class="col" id="cProjects">
+    <h3>Projects</h3>
+    <div class="row"><button onclick="openProjDlg()">+ project</button></div>
+    <div id="projects"></div>
+  </div>
+  <div class="col" id="cGoals">
+    <h3>Project <span id="gProj" class="muted"></span></h3>
+    <div class="item" id="initItem" onclick="selInit()">⚙ Init / Features <span id="initSt" class="st"></span></div>
+    <div class="ntf" id="notifyBox">
+      <div class="ntf-hd">🔔 Notify <span id="ntfConn" class="badge">…</span></div>
+      <label class="ntf-row"><input type="checkbox" id="ntfEnabled" onchange="saveNotify()"> push project này</label>
+      <div class="ntf-row"><span class="st">level</span>
+        <select id="ntfLevel" onchange="saveNotify()">
+          <option value="milestone">milestone</option>
+          <option value="escalate">escalate</option>
+          <option value="verbose">verbose</option>
+        </select>
+        <button onclick="testNotify()">test push</button>
+      </div>
+      <div id="ntfSt" class="st"></div>
+    </div>
+    <div class="row"><input id="gText" placeholder="goal..."><button onclick="addGoal()">+ goal</button></div>
+    <div id="goals"></div>
+  </div>
+  <div class="col" id="cDetail">
+    <div id="advPanel">
+      <h3>Advisor · Init</h3>
+      <div id="chatlog" class="chatwrap"></div>
+      <div class="row"><input id="chatMsg" placeholder="nói với advisor…" style="flex:1"><button onclick="sendChat()">send</button><span id="chatSt" class="st"></span></div>
+      <div class="initp">
+        <div class="row"><input id="artifactPath" value="docs/Project/domain-contract.md" placeholder="artifact path" style="flex:1"><button onclick="lastAdvisorToArtifact()">last advisor → artifact + draft</button><button onclick="parseArtifactToDraft()">artifact → draft</button><button onclick="saveArtifact()">save artifact</button></div>
+        <textarea id="artifactBody" placeholder="artifact markdown sau khi user duyệt"></textarea>
+      </div>
+      <div class="row"><button onclick="proposePlan()">đề xuất plan</button><button onclick="saveDraft()">save draft</button><button onclick="approveContract('replace')">Approve & Replace</button><button onclick="approveContract('append')">Approve & Append</button></div>
+      <div class="row"><button onclick="runPlan()">run plan</button><button onclick="stopPlan()">stop plan</button><span id="planSt" class="st"></span></div>
+      <div id="draftBox" class="initp" style="display:none">
+        <div class="row"><select id="draftMode"><option value="sequential">sequential</option><option value="parallel">parallel</option></select><input id="draftReason" placeholder="reason"></div>
+        <textarea id="draftGoals" placeholder="mỗi dòng là một goal"></textarea>
+        <div class="st">Replace supersede goal cũ chưa chạy; Append nối thêm goal mới.</div>
+      </div>
+      <div id="contract" class="st"></div>
+    </div>
+    <div id="goalPanel" style="display:none">
+      <h3>Goal <span id="gSel" class="muted"></span> · <span id="gState"></span></h3>
+      <div id="goalInfo" class="diag"></div>
+<div class="row">
+        <button onclick="run()">▶ run</button>
+        <button onclick="ctl('pause')">⏸ pause</button>
+        <button onclick="ctl('stop')">⏹ stop</button>
+        <input id="inj" placeholder="steer message"><button onclick="ctl('steer')">steer</button>
+      </div>
+      <div class="row"><button onclick="toggleCfg()">⚙ config</button><span id="statusLine" class="st"></span></div>
+      <div id="cfgBox" style="display:none">
+        <textarea id="cfg"></textarea>
+        <div class="row"><button onclick="loadCfg()">reload</button><button onclick="saveCfg()">save config</button></div>
+      </div>
+      <div id="feed"></div>
+    </div>
+  </div>
+  <div class="col" id="cTasks">
+    <h3>Task List <button onclick="setFilter(null)" style="float:right;font-size:10px;padding:1px 6px">all</button></h3>
+    <div id="tasks"></div>
+  </div>
+</div>
+<div id="dlg" class="overlay" style="display:none"><div class="modal">
+  <h3>New project</h3>
+  <div class="row"><input id="pName" placeholder="project name" style="flex:1"></div>
+  <div class="row"><input id="pDir" placeholder="folder path (chọn bên dưới hoặc dán)" style="flex:1"></div>
+  <div class="row"><button onclick="fsUp()">⬆ ..</button><span id="fsPath" class="st" style="flex:1;overflow:hidden"></span></div>
+  <div id="fsList" style="max-height:220px;overflow:auto;border:1px solid var(--line);border-radius:5px"></div>
+  <div class="row" style="margin-top:8px"><button onclick="createProj()">create</button><button onclick="closeDlg()">cancel</button></div>
+</div></div>
+<script>
+let PID=null, GID=null, es=null, currentContract=null, currentProject=null, currentGoalIds=[], currentGoal=null, currentGoalConfig=null, chatCache=[], draftDirty=false;
+const $=id=>document.getElementById(id);
+const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+function saveTok(){localStorage.PARLEY_TOKEN=$('tok').value; $('who').textContent='token set'; loadProjects();}
+function tok(){return $('tok').value||localStorage.PARLEY_TOKEN||'';}
+function H(){return {'Authorization':'Bearer '+tok(),'Content-Type':'application/json'};}
+async function api(m,u,body){const r=await fetch(u,{method:m,headers:H(),body:body?JSON.stringify(body):undefined});
+  if(!r.ok){$('who').textContent='ERR '+r.status; throw new Error(r.status);} return r.status===204?null:r.json();}
+
+async function loadProjects(){const ps=await api('GET','/projects'); const el=$('projects'); el.innerHTML='';
+  ps.forEach(p=>{const d=document.createElement('div'); d.className='item'+(p.id===PID?' sel':'');
+    d.innerHTML=`<b>${p.name}</b><div class="st">${p.project_dir}</div>`; d.onclick=()=>selProject(p); el.appendChild(d);});}
+function openProjDlg(){$('dlg').style.display='flex'; $('pName').value=''; fsBrowse('');}
+function closeDlg(){$('dlg').style.display='none';}
+let _fsParent='';
+async function fsBrowse(path){try{const r=await api('GET','/fs/list?path='+encodeURIComponent(path||''));
+  const isDrives=(r.path==='DRIVES');
+  $('pDir').value=isDrives?'':r.path; $('fsPath').textContent=isDrives?'Drives (chọn ổ đĩa)':r.path; _fsParent=r.parent;
+  const el=$('fsList'); el.innerHTML='';
+  (r.dirs||[]).forEach(d=>{const x=document.createElement('div'); x.className='fsd';
+    x.textContent=(isDrives?'💽 ':'📁 ')+d.name; x.onclick=()=>fsBrowse(d.path); el.appendChild(x);});}catch(_){}}
+function fsUp(){if(_fsParent) fsBrowse(_fsParent);}
+async function createProj(){const name=$('pName').value.trim(), dir=$('pDir').value.trim();
+  if(!name||!dir){alert('nhập name + folder');return;}
+  await api('POST','/projects',{name,project_dir:dir}); closeDlg(); loadProjects();}
+
+function setMode(m){$('advPanel').style.display=(m==='init')?'block':'none'; $('goalPanel').style.display=(m==='goal')?'block':'none';}
+async function selInit(){if(!PID){alert('chọn project');return;} setMode('init');
+  try{await api('POST',`/projects/${PID}/init`);}catch(_){}
+  refreshInit(); loadGoals(); loadChat();}
+function safeProjectName(name){return String(name||'Project').replace(/[^A-Za-z0-9._-]+/g,'-').replace(/^-+|-+$/g,'')||'Project';}
+async function selProject(p){PID=p.id; currentProject=p; $('gProj').textContent='· '+p.name;
+  $('artifactPath').value=`docs/${safeProjectName(p.name)}/domain-contract.md`;
+  loadProjects(); await refreshInit(); loadGoals(); loadChat(); loadNotify(); setMode('init');}
+
+let _ntfBusy=false;
+function loadNotify(){loadNotifyConfig(); loadNotifyStatus();}
+async function loadNotifyConfig(){if(!PID)return;   // cheap: per-project enabled/level (hot, polled)
+  try{const p=await api('GET',`/projects/${PID}`); const n=p.notify||{};
+    _ntfBusy=true; $('ntfEnabled').checked=(n.enabled===true); $('ntfLevel').value=n.level||'milestone'; _ntfBusy=false;
+  }catch(_){}}
+async function loadNotifyStatus(){   // costlier: hits Telegram getMe; polled slowly
+  try{const s=await api('GET','/notify/status'); const el=$('ntfConn');
+    if(!s.configured){el.textContent='env chưa đặt'; el.className='badge bad';}
+    else if(s.connected){el.textContent='@'+(s.bot_username||'bot')+(s.command_control?' · 2-way':' · push-only'); el.className='badge ok';}
+    else {el.textContent='offline'; el.className='badge warn';}
+  }catch(_){$('ntfConn').textContent='?';}}
+async function saveNotify(){if(!PID||_ntfBusy)return;
+  try{await api('PUT',`/projects/${PID}/notify`,{enabled:$('ntfEnabled').checked, level:$('ntfLevel').value});
+    $('ntfSt').textContent='saved';}catch(e){$('ntfSt').textContent='⚠ lỗi save';}}
+async function testNotify(){if(!PID)return; $('ntfSt').textContent='⏳ gửi test…';
+  try{const r=await api('POST',`/projects/${PID}/notify/test`);
+    $('ntfSt').textContent=r.ok?('✓ đã gửi (topic '+(r.thread_id??'?')+')'):('⚠ '+(r.error||'gửi thất bại'));}
+  catch(e){$('ntfSt').textContent='⚠ '+(e.message==='400'?'notifier chưa cấu hình (env)':'lỗi');}}
+async function refreshInit(){if(!PID)return; try{const p=await api('GET',`/projects/${PID}`);
+  $('initSt').textContent=p.initialized?('✓ init · '+(p.gates||[]).length+' gates'):'chưa init';
+  currentGoalIds=(p.contract&&p.contract.goal_ids)||[];
+  if(p.contract) renderContract(p.contract); else $('contract').innerHTML='';}catch(_){}}
+async function initProject(){if(!PID){alert('chọn project');return;}
+  const p=await api('POST',`/projects/${PID}/init`); $('initSt').textContent='✓ init · '+(p.gates||[]).length+' gates';}
+function bubble(role, text){const d=document.createElement('div'); d.className='bub '+(role==='user'?'user':'adv');
+  const nm=document.createElement('div'); nm.className='nm'; nm.textContent=(role==='user'?'You':'Advisor');
+  const tx=document.createElement('div'); tx.textContent=text; d.appendChild(nm); d.appendChild(tx); return d;}
+function renderChat(ch){chatCache=ch||[]; const el=$('chatlog'); el.innerHTML='';
+  (ch||[]).forEach(m=>el.appendChild(bubble(m.role, m.text||''))); el.scrollTop=el.scrollHeight;}
+async function loadChat(){if(!PID)return; try{renderChat(await api('GET',`/projects/${PID}/chat`));}catch(_){}}
+async function sendChat(){if(!PID){alert('chọn project');return;} const msg=$('chatMsg').value.trim(); if(!msg)return;
+  $('chatMsg').value=''; const log=$('chatlog'); log.appendChild(bubble('user',msg));
+  const pend=bubble('adv','⏳ đang reasoning…'); log.appendChild(pend); log.scrollTop=log.scrollHeight;
+  try{const r=await api('POST',`/projects/${PID}/chat`,{message:msg});
+    if(r.completed){loadChat();} else {pend.lastChild.textContent='⚠ '+(r.error||'lỗi');}}
+  catch(e){pend.lastChild.textContent='⚠ lỗi request';}}
+async function lastAdvisorToArtifact(){const m=[...chatCache].reverse().find(x=>x.role==='advisor'); if(!m)return;
+  $('artifactBody').value=m.text||''; await parseArtifactToDraft();}
+async function parseArtifactToDraft(){if(!PID)return; const text=$('artifactBody').value.trim(); if(!text){$('chatSt').textContent='artifact empty';return;}
+  try{const c=await api('POST',`/projects/${PID}/contract/from_text`,{text}); renderContract(c); $('chatSt').textContent='draft parsed: '+(c.goals||[]).length+' goals'; loadGoals();}
+  catch(e){$('chatSt').textContent='no goals found in artifact';}}
+async function saveArtifact(){if(!PID)return; const r=await api('POST',`/projects/${PID}/artifacts`,{path:$('artifactPath').value,content:$('artifactBody').value});
+  $('chatSt').textContent='saved '+r.path;}
+async function proposePlan(){if(!PID)return; $('chatSt').textContent='⏳ advisor chốt plan…';
+  try{const c=await api('POST',`/projects/${PID}/propose_plan`); $('chatSt').textContent=''; renderContract(c); loadChat();}
+  catch(e){$('chatSt').textContent='⚠ lỗi';}}
+function draftFromUi(){return {execution_mode:$('draftMode').value, reason:$('draftReason').value,
+  goals:$('draftGoals').value.split(/\n+/).map(x=>x.trim()).filter(Boolean).map((title,i)=>({
+    title, description:((currentContract&&currentContract.goals&&currentContract.goals[i]&&currentContract.goals[i].description)||'')
+  }))};}
+function renderContract(c){currentContract=c; const el=$('contract'); el.innerHTML=''; if(!c||!c.goals){el.textContent='(no plan)'; $('draftBox').style.display='none'; return;}
+  $('draftBox').style.display='block'; $('draftMode').value=c.execution_mode||'sequential'; $('draftReason').value=c.reason||'';
+  $('draftGoals').value=(c.goals||[]).map(g=>g.title||'').join('\n');
+  draftDirty=false;
+  const h=document.createElement('div'); h.textContent=`mode=${c.execution_mode}${c.approved?' · approved':' · draft'} — ${c.reason||''}`;
+  el.appendChild(h);
+  (c.goals||[]).forEach(g=>{const d=document.createElement('div'); d.textContent='• '+(g.title||'')+(g.description?' — '+String(g.description).replace(/\s+/g,' ').slice(0,140):''); el.appendChild(d);});}
+async function saveDraft(){if(!PID)return; const c=await api('PUT',`/projects/${PID}/contract`,draftFromUi()); renderContract(c); $('chatSt').textContent='draft saved';}
+async function approveContract(strategy){if(!PID)return;
+  if(currentContract&&currentContract.approved&&!draftDirty){$('chatSt').textContent='already approved; parse/edit a draft first'; return;}
+  await saveDraft(); await api('POST',`/projects/${PID}/approve?strategy=${strategy||'replace'}`);
+  $('chatSt').textContent='approved '+(strategy||'replace'); await refreshInit(); loadGoals();}
+async function runPlan(){if(!PID)return; try{const r=await api('POST',`/projects/${PID}/run`);
+  $('planSt').textContent=r.state+(r.active_goal_id?' · '+r.active_goal_id:''); loadGoals();}
+  catch(e){$('planSt').textContent='cannot run plan';}}
+async function stopPlan(){if(!PID)return; const r=await api('POST',`/projects/${PID}/stop`);
+  $('planSt').textContent=r.state; loadGoals();}
+async function pollPlan(){if(!PID)return; try{const r=await api('GET',`/projects/${PID}/run`);
+  $('planSt').textContent=r.state+(r.active_goal_id?' · '+r.active_goal_id:'');}catch(_){}}
+async function loadGoals(){if(!PID)return; let gs=await api('GET',`/projects/${PID}/goals`); const el=$('goals'); el.innerHTML='';
+  const order={}; currentGoalIds.forEach((id,i)=>order[id]=i);
+  gs=gs.filter(g=>g.state!=='superseded').sort((a,b)=>(order[a.id]??9999)-(order[b.id]??9999));
+  gs.forEach(g=>{const d=document.createElement('div'); d.className='item'+(g.id===GID?' sel':'');
+    d.innerHTML='<div class="ttl"></div><div class="desc"></div><span class="badge '+g.state+'"></span>';
+    d.querySelector('.ttl').textContent=String(g.goal||'').slice(0,80);
+    d.querySelector('.desc').textContent=String(g.description||'').replace(/\s+/g,' ').slice(0,180);
+    d.querySelector('.badge').textContent=g.state;
+    d.onclick=()=>selGoal(g); el.appendChild(d);});}
+async function addGoal(){if(!PID){alert('chọn project');return;} await api('POST',`/projects/${PID}/goals`,{goal:$('gText').value});
+  $('gText').value=''; loadGoals();}
+
+async function selGoal(g){GID=g.id; currentGoal=g; currentGoalConfig=null; setMode('goal'); $('gSel').textContent=g.id; $('gState').innerHTML=`<span class="${g.state}">${g.state}</span>`;
+  renderGoalInfo(); loadGoalConfig(); loadGoals(); evBuf=[]; taskFilter=null; $('feed').innerHTML=''; if(es)es.close();
+  es=new EventSource(`/goals/${GID}/feed?token=`+encodeURIComponent(tok()));
+  es.onmessage=e=>{try{addEv(JSON.parse(e.data))}catch(_){ }};
+  loadTasks(); pollStatus();}
+async function loadGoalConfig(){if(!GID)return; try{currentGoalConfig=await api('GET',`/goals/${GID}/config`); renderGoalInfo();}catch(_){}}
+function renderGoalInfo(){
+  const el=$('goalInfo'); if(!el||!currentGoal)return;
+  const desc=String(currentGoal.description||'').trim();
+  const cfg=currentGoalConfig||{};
+  const stop=currentGoal.stop_reason?`<div><span class="bad">stop_reason:</span> ${esc(currentGoal.stop_reason)}</div>`:'';
+  const details=desc?`<div>${esc(desc.replace(/\s+/g,' ').slice(0,260))}</div>`:'<div class="warn">Missing goal details. This title-only goal was created from an old plan parse; re-parse final Advisor plan and Approve & Replace.</div>';
+  const contract=cfg.contract_path?`<div><span class="ok">contract:</span> ${esc(cfg.contract_path)}</div>`:'<div class="warn">contract_path is null; agent sees "(chua co)" unless details explicitly point to docs.</div>';
+  el.innerHTML=`<div><b>${esc(currentGoal.goal||'')}</b></div>${details}${contract}${stop}`;
+}
+function evView(o){
+  const t=(o.ts||'').slice(11,19); let who='⚙ harness', body='';
+  switch(o.type){
+    case 'user_goal': who='🧑 user'; body=o.goal||''; break;
+    case 'phase_start': who='⚙ harness'; body='Phase '+o.phase+' — bắt đầu'; break;
+    case 'phase_end': who='⚙ harness'; body='Phase '+o.phase+' — kết thúc'; break;
+    case 'advisor': who='Advisor review'; body=(o.verdict?o.verdict+' · ':'')+(o.action||'')+
+      (o.role?' → '+o.role:'')+(o.slice?' · slice '+o.slice:'')+(o.prompt?'\n'+o.prompt:''); break;
+    case 'dispatch': who='Supervisor → '+o.role; body='[slice '+o.slice+']'
+      +(o.prompt_path?'\nPROMPT_PATH: '+o.prompt_path:'')+'\n'+(o.prompt||''); break;
+    case 'gov': who='⚖ supervisor'; body=o.verdict+(o.reason?' — '+o.reason:''); break;
+    case 'report': who=(o.role||'B')+' → A';
+      body='done='+o.done+(o.verdict?' · verdict='+o.verdict:'')+(o.report_path?' · '+o.report_path:'')+'\n'+(o.excerpt||''); break;
+    case 'verify': who='⚙ verify'; body='slice '+(o.slice||'')+' · exit='+o.exit+(o.failed_gate?' · failed: '+o.failed_gate:''); break;
+    case 'slice_done': who='✅ harness'; body='slice '+o.slice+' DONE · commit '+String(o.commit||'').slice(0,7); break;
+    case 'turn_error': who='⚠ A'; body=(o.reason==='NONE'?'Advisor returned no valid directive before the turn ended.':(o.reason||''))+'\n'+(o.raw_excerpt||''); break;
+    case 'stopped': who='⚙ harness'; body=(o.reason==='observer'?'Stopped by end-user/observer.':'Stopped: '+(o.reason||'unknown')); break;
+    case 'resume': case 'paused': who='⚙ harness'; body=o.note||o.type; break;
+    case 'housekeeping': who='📝 document'; body='cập nhật '+(o.doc||'CHANGELOG')+(o.slice?' · slice '+o.slice:''); break;
+    case 'push': who='⬆ git push'; body='branch '+(o.branch||'')+' · '+(o.ok?'OK ✓':'FAIL ✗'); break;
+    case 'executor_retry': who='🔁 executor'; body='retry '+(o.provider||'')+'/'+(o.model||'-')
+      +' (lần '+o.attempt+') · '+(o.reason||'')+(o.raw_excerpt?'\n'+o.raw_excerpt:''); break;
+    case 'executor_fallback': who='🔀 executor'; body=(o.from_provider||'')+'/'+(o.from_model||'-')
+      +' → '+(o.to_provider||'')+'/'+(o.to_model||'-')+'\nreason: '+(o.reason||'')
+      +(o.raw_excerpt?'\n'+o.raw_excerpt:''); break;
+    case 'executor_error': case 'executor_exhausted': who='🆘 executor';
+      body='STUCK ('+(o.role||'')+'): '+(o.reason||'')+' — cần người can thiệp'
+      +(Array.isArray(o.attempts)?'\n'+o.attempts.map((a,i)=>(i+1)+'  '+(a.provider||'')+'/'+(a.model||'-')+'  '+(a.reason||'')).join('\n'):''); break;
+    default: body=JSON.stringify(Object.fromEntries(Object.entries(o).filter(([k])=>!['id','ts','type'].includes(k))));
+  }
+  return {t, who, body:(body||'').slice(0,1500)};
+}
+let evBuf=[], taskFilter=null;
+function matchF(o){return !taskFilter || o.task_id===taskFilter || o.reviews_task===taskFilter;}
+function elFor(o){
+  const v=evView(o); const d=document.createElement('div'); d.className='ev '+(o.type||'');
+  d.innerHTML='<div class="hd"><span class="t"></span><span class="who"></span><span class="t mid"></span></div><div class="body"></div>';
+  d.querySelector('.t').textContent=v.t;
+  d.querySelector('.who').textContent=v.who;
+  d.querySelector('.mid').textContent='#'+o.id+' '+o.type;
+  d.querySelector('.body').textContent=v.body;   // textContent: an toàn với nội dung untrusted
+  return d;
+}
+function addEv(o){evBuf.push(o); if(matchF(o)) $('feed').prepend(elFor(o)); if(o.type==='turn_error'||o.type==='dispatch'||o.type==='report')loadTasks();}
+function renderFeed(){const f=$('feed'); f.innerHTML=''; evBuf.filter(matchF).forEach(o=>f.prepend(elFor(o)));}
+function setFilter(tid){taskFilter=tid; renderFeed(); loadTasks();}
+async function loadTasks(){if(!GID)return; try{
+  const ts=await api('GET',`/goals/${GID}/tasks`); const el=$('tasks'); el.innerHTML='';
+  if(!ts.length){
+    const d=document.createElement('div'); d.className='tk';
+    d.innerHTML='<div class="ttl"></div><div class="meta"></div>';
+    const hasTurnError=evBuf.some(e=>e.type==='turn_error');
+    d.querySelector('.ttl').textContent=hasTurnError?'No task dispatched':'No task yet';
+    d.querySelector('.meta').textContent=hasTurnError?'Advisor failed before DISPATCH. Check turn_error in timeline.':'Waiting for Supervisor -> role dispatch.';
+    el.appendChild(d); return;
+  }
+  const ic={done:'☑',rejected:'✗',running:'◐',verifying:'◐',awaiting_advisor_review:'◐',blocked:'⚠'};
+  ts.forEach(t=>{const d=document.createElement('div');
+    d.className='tk'+(t.id===taskFilter?' sel':'')+(t.origin==='emergent'?' emergent':'');
+    d.innerHTML='<div class="ttl"></div><div class="meta"></div><div class="prov"></div><div class="att" style="display:none"></div>';
+    d.querySelector('.ttl').textContent=(ic[t.status]||'○')+' '+String(t.title||t.role||'').slice(0,60);
+    const fb=(t.fallback_count||0)>0?' · fallback '+t.fallback_count:'';
+    d.querySelector('.meta').textContent=(t.role||'')+' · '+t.status+fb
+      +(t.origin==='emergent'?' · emergent':'')+(t.commit?' · '+String(t.commit).slice(0,7):'');
+    // current provider/model line (ADR-15)
+    const pm=t.provider?(t.provider+(t.model?'/'+t.model:'')):'';
+    d.querySelector('.prov').textContent=pm;
+    // attempts table (shown when this task is the active filter)
+    const att=d.querySelector('.att');
+    if((t.attempts||[]).length){
+      att.innerHTML=t.attempts.map((a,i)=>`<div class="attrow" title="${esc(a.raw_excerpt||'')}"><span>${i+1}</span>`
+        +`<span>${esc((a.provider||'')+(a.model?'/'+a.model:''))}</span>`
+        +`<span class="${a.reason?'bad':'ok'}">${esc(a.reason||'running')}</span></div>`).join('');
+      att.style.display=(t.id===taskFilter)?'block':'none';
+    }
+    d.onclick=()=>setFilter(t.id); el.appendChild(d);});
+  }catch(_){}}
+async function pollStatus(){if(!GID)return; try{const s=await api('GET',`/goals/${GID}/status`);
+  const g=s.goal||{}; $('gState').innerHTML=`<span class="${g.state}">${g.state}</span>`;
+  currentGoal=Object.assign(currentGoal||{}, g); renderGoalInfo();
+  const last=[...evBuf].reverse().find(e=>e.phase!=null||e.turn!=null)||{};
+  const c=(s.status||{}).current||{}; $('statusLine').textContent=`phase ${c.phase??last.phase??'-'} slice ${c.slice??'-'} role ${c.role??'-'} turn ${c.turn??last.turn??'-'}`;
+  }catch(_){}}
+setInterval(()=>{if(PID){pollPlan();loadGoals();loadNotifyConfig();} if(GID){pollStatus();loadTasks();}},2500);
+setInterval(()=>{if(PID)loadNotifyStatus();},30000);   // connection badge: hits Telegram getMe, poll slowly
+
+async function run(){if(!GID)return; await api('POST',`/goals/${GID}/run`); loadGoals(); pollStatus();}
+async function ctl(verdict){if(!GID)return; await api('POST',`/goals/${GID}/control`,{verdict,inject:$('inj').value}); loadGoals(); pollStatus();}
+function toggleCfg(){const b=$('cfgBox'); b.style.display=b.style.display==='none'?'block':'none'; if(b.style.display==='block')loadCfg();}
+async function loadCfg(){if(!GID)return; const c=await api('GET',`/goals/${GID}/config`); $('cfg').value=JSON.stringify(c,null,2);}
+async function saveCfg(){if(!GID)return; let c; try{c=JSON.parse($('cfg').value);}catch(e){alert('JSON invalid: '+e);return;}
+  await api('PUT',`/goals/${GID}/config`,c); $('who').textContent='config saved';}
+
+['draftMode','draftReason','draftGoals'].forEach(id=>$(id).addEventListener('input',()=>{draftDirty=true;}));
+$('tok').value=localStorage.PARLEY_TOKEN||''; if(tok())loadProjects();
+</script>
+</body></html>

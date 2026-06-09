@@ -1,0 +1,5 @@
+# Web monitor only (parley/web). Lõi Parley (init/run/test) KHÔNG cần các gói này.
+# Cài: pip install -r requirements-web.txt
+# Phiên bản ghim cố định; có thể nâng khi cần.
+fastapi==0.115.6
+uvicorn[standard]==0.32.1

@@ -1,0 +1,91 @@
+{
+  "project_dir": "D:\\tmp\\smoke",
+  "data_dir": "./data",
+  "contract_path": null,
+  "first_phase": 1,
+  "pipeline_mode": "free",
+  "every_n_turns": 1,
+  "goal": "Trong thu muc lam viec, hoan thanh 3 viec: (1) TAO file notes.txt gom 2 dong: 'todo: viet parley' va 'todo: test'; (2) SUA notes.txt, them dong cuoi: 'done'; (3) TIM tat ca file chua chuoi 'parley' trong thu muc va ghi danh sach duong dan vao found.txt. Hoan thanh ca 3 roi moi COMPLETE.",
+  "advisor_cmd": [
+    "codex",
+    "exec",
+    "--sandbox",
+    "read-only",
+    "--skip-git-repo-check"
+  ],
+  "supervisor_cmd": [
+    "kiro-cli",
+    "chat",
+    "--no-interactive",
+    "--agent",
+    "supervisor",
+    "--trust-tools="
+  ],
+  "roles": {
+    "analyzer": {
+      "cmd": [
+        "kiro-cli",
+        "chat",
+        "--no-interactive",
+        "--agent",
+        "analyzer"
+      ],
+      "edit": false
+    },
+    "architect": {
+      "cmd": [
+        "kiro-cli",
+        "chat",
+        "--no-interactive",
+        "--agent",
+        "architect"
+      ],
+      "edit": false
+    },
+    "researcher": {
+      "cmd": [
+        "kiro-cli",
+        "chat",
+        "--no-interactive",
+        "--agent",
+        "researcher"
+      ],
+      "edit": false
+    },
+    "reviewer": {
+      "cmd": [
+        "opencode",
+        "run",
+        "--dangerously-skip-permissions"
+      ],
+      "edit": false
+    },
+    "coder": {
+      "cmd": [
+        "opencode",
+        "run",
+        "--dangerously-skip-permissions"
+      ],
+      "edit": true
+    },
+    "fixer": {
+      "cmd": [
+        "opencode",
+        "run",
+        "--dangerously-skip-permissions"
+      ],
+      "edit": true
+    }
+  },
+  "limits": {
+    "max_turns": 14,
+    "hard_iter_cap": 500,
+    "max_turn_errors": 5,
+    "idle_timeout_s": 120,
+    "hard_timeout_s": 1800
+  },
+  "verify": {
+    "timeout_s": 600,
+    "gates": []
+  }
+}

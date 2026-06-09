@@ -1,0 +1,58 @@
+# Secrets — never commit
+.env
+
+# Python
+__pycache__/
+*.py[cod]
+.pytest_cache/
+
+# Parley runtime logs / scratch
+.uvicorn-*.log
+.artifact-server.*.log
+.draft-plan-server.*.log
+.s4-server.*.log
+
+# Local registry/data home (if pointed inside repo)
+/data/
+
+# Editor / OS
+.DS_Store
+Thumbs.db
+
+# Scratch files accidentally created by shell quoting errors (top-level, no extension)
+/1
+/(i+1)'
+/--force
+/arg0
+/actionable
+/bo
+/cfg.limits.max_warm_turns_per_phase
+/chat
+/cold.,
+/cold.,+
+/cursor
+/dict
+/done
+/force
+/goal_ids,
+/list
+/None
+/not
+/running
+/State
+/str
+/task_id`
+/TextOutcome
+/{a.config}
+/chß║Ñp
+/hß╗úp
+
+# Transient analysis / experiment dirs
+/.tmp-wayland-analysis/
+
+
+# External refs / node deps / scratch dirs
+refs/
+mcp/node_modules/
+.tmp-wayland-analysis/
+.pytest_cache/
