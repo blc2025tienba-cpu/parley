@@ -42,9 +42,18 @@ Tất cả thay đổi đáng chú ý của codebase Parley. Định dạng theo
   giữ bản audit ở data_dir. `.gitignore` chặn `.parley/`.
 - **Notify goal lẻ** (`notify._tick_push`): trước chỉ duyệt `contract.goal_ids` → goal chạy lẻ
   qua `/goals/{gid}/run` không bao giờ push Telegram. Nay union với `store.list_goals(pid)`.
-- **Kiro read-only roles trust-tools** (LS-017, `cli.default_roles`): analyzer/architect/researcher
-  cmd thêm `--trust-tools=fs_read` — trước thiếu nên kiro chặn ở "Tool approval required" dưới
-  `--no-interactive` khi role cần đọc/grep file. `fs_read` = read/list/search; KHÔNG fs_write/bash.
+- **Read-only roles write-capable + SCOPE mềm** (LS-017/020, hướng B, `cli.default_roles` +
+  `context.role_prompt_document`): read-only role (analyzer/architect/researcher/reviewer) trước bị
+  CLI cấm ghi → không ghi được report file (mâu thuẫn protocol report-trailer). Nay cho ghi thật ở
+  tầng CLI (kiro `--trust-all-tools`, claude `--dangerously-skip-permissions`, cursor `--force`,
+  reviewer opencode `build`); ràng buộc "không sửa source" chuyển sang **SCOPE mềm** trong role prompt
+  + advisor review diff. Cờ role `edit` vẫn False (harness không feed diff/verify). Prompt cũng yêu cầu
+  đọc `AGENTS.md` ở gốc project_dir để đồng bộ contract.
+- **Phantom trailer → MISSING_REPORT** (LS-021, `executor.classify` + `report_present`): trước chỉ cần
+  IN `<<<REPORT>>>` là coi thành công kể cả khi không ghi file → Advisor review report rỗng. Nay trailer
+  chỉ hợp lệ khi report file tồn tại + non-empty; trailer giả → `MISSING_REPORT` (STOP sạch).
+- **permission_denied → fallback** (LS-022, `executor._ACTION`): trước STOP cứng; nay `NEXT_PROFILE` —
+  provider bị chặn ghi thì thử provider/mode kế (đọc-permission lỗi vẫn được các signature khác bắt).
 - **Streaming live-log + pid** (LS-019, `backends._spawn`): mỗi spawn ghi stdout streaming ra
   `data_dir/live/<role>-<n>.log` (header `# pid=...`, flush từng dòng) song song buffer in-memory;
   endpoint `GET /goals/{gid}/live` trả last-line + mtime mỗi attempt → phân biệt "đang chạy" vs "treo"
@@ -59,4 +68,7 @@ Tất cả thay đổi đáng chú ý của codebase Parley. Định dạng theo
   B và ADR-16 (memory ledger / agentmemory) là đợt sau.
 - LS-018a (claude opus `-p` timeout 0-byte) là giới hạn môi trường: opus không stream partial, workload
   reasoning lớn >hard_timeout → mất sạch output. Giảm thiểu bằng task-split + giữ hard_timeout 1800s.
-- Full unit suite: 161/161 xanh.
+- LS-020 hướng B (write-capable + SCOPE mềm) đánh đổi: bỏ cưỡng chế read-only ở tầng CLI, dựa vào
+  SCOPE prompt + advisor review. Test `test_role_modes.py` đổi từ "assert mode=read" sang invariant
+  hướng B (read-only role write-capable nhưng có SCOPE; edit role write). Chưa live smoke lại.
+- Full unit suite: 168/168 xanh.

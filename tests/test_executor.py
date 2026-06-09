@@ -67,7 +67,9 @@ class TestFallbackAction(unittest.TestCase):
         self.assertEqual(executor.fallback_action(executor.USAGE_EXHAUSTED), executor.SKIP_PROVIDER)
         self.assertEqual(executor.fallback_action(executor.AUTH_ERROR), executor.SKIP_PROVIDER)
         self.assertEqual(executor.fallback_action(executor.ACCOUNT_SUSPENDED), executor.SKIP_PROVIDER)
-        self.assertEqual(executor.fallback_action(executor.PERMISSION_DENIED), executor.STOP)
+        # LS-022: permission_denied (e.g. read-only mode blocked the report write) ->
+        # try the next profile/provider, which may run in a write-capable mode.
+        self.assertEqual(executor.fallback_action(executor.PERMISSION_DENIED), executor.NEXT_PROFILE)
         self.assertEqual(executor.fallback_action(executor.CLI_UNAVAILABLE), executor.NEXT_PROFILE)
         # ADR-15 update: timeout is transient (API_TIMEOUT_MS) -> retry then next profile
         self.assertEqual(executor.fallback_action(executor.TIMEOUT), executor.NEXT_PROFILE)
@@ -104,14 +106,27 @@ class TestStaleProtection(unittest.TestCase):
 
 # ---- fallback chain ----------------------------------------------------------
 class ScriptBackend:
-    """Returns a queued RunResult per call; records the commands it was given."""
-    def __init__(self, results):
+    """Returns a queued RunResult per call; records the commands it was given.
+
+    LS-021: a real role that emits a <<<REPORT>>> trailer also WRITES the report
+    file. To keep tests realistic (a trailer alone is no longer accepted as success),
+    when `report_abs` is set this backend writes a non-empty report file whenever the
+    returned stdout contains a trailer. Set report_abs=None to simulate a PHANTOM
+    trailer (claimed report, no file) for the LS-021 regression test."""
+    def __init__(self, results, report_abs="__auto__"):
         self.results = list(results)
+        self.report_abs = report_abs   # "__auto__" -> _run fills it; None -> phantom (no file)
         self.calls = []   # (provider-ish argv0, full cmd, stdin)
 
     def run_once(self, profile, prompt, cwd, idle_timeout, hard_timeout, stop_re=None):
         self.calls.append((profile.cmd[0], list(profile.cmd), prompt))
-        return self.results.pop(0) if self.results else RunResult("", 0)
+        res = self.results.pop(0) if self.results else RunResult("", 0)
+        if self.report_abs and "<<<REPORT" in (res.stdout or ""):
+            from pathlib import Path as _P
+            p = _P(self.report_abs)
+            p.parent.mkdir(parents=True, exist_ok=True)
+            p.write_text("# report\nwork done\n", encoding="utf-8")
+        return res
 
 
 def _role(primary_cmd, fallbacks, edit=False):
@@ -131,6 +146,10 @@ class TestRunWithFallback(unittest.TestCase):
         self.events.append({"type": etype, **kw})
 
     def _run(self, role_cfg, backend):
+        # LS-021: by default the backend materializes the report file on a trailer
+        # (realistic). A test wanting a PHANTOM trailer passes ScriptBackend(..., report_abs=None).
+        if getattr(backend, "report_abs", None) == "__auto__":
+            backend.report_abs = self.rp_abs
         return executor.run_with_fallback(
             "coder", role_cfg, backend, stdin_input="do it",
             prompt_path=str(self.proj / "p.md"), report_rel=self.rp_rel,
@@ -203,14 +222,18 @@ class TestRunWithFallback(unittest.TestCase):
         # opencode/B was skipped: only 2 spawns (opencode/A, cursor)
         self.assertEqual(len(be.calls), 2)
 
-    def test_permission_denied_stops_no_fallback(self):
-        be = ScriptBackend([RunResult("HTTP 403 forbidden", 0), RunResult("should-not-run", 0)])
+    def test_permission_denied_falls_back(self):
+        # LS-022: a read-only provider blocked from writing the report (permission_denied)
+        # must FALL BACK to the next profile/mode, not STOP — another provider may write.
+        report = '<<<REPORT path="r.md" done="true">>>'
+        be = ScriptBackend([RunResult("HTTP 403 forbidden", 0), RunResult(report, 0)])
         role = _role(["kiro-cli", "x"], [{"provider": "claude", "cmd": ["claude"]}])
-        out = self._run(role, be)
-        self.assertEqual(out.kind, "failed")
-        self.assertEqual(out.reason, executor.PERMISSION_DENIED)
-        self.assertFalse(out.exhausted)
-        self.assertEqual(len(be.calls), 1)                    # stopped immediately
+        out = self._run(role, be)                             # backend auto-writes file on trailer
+        self.assertEqual(out.kind, "report")                  # recovered on claude fallback
+        self.assertEqual(out.provider, "claude")
+        fb = [e for e in self.events if e["type"] == "executor_fallback"]
+        self.assertEqual(fb[0]["reason"], executor.PERMISSION_DENIED)
+        self.assertEqual(len(be.calls), 2)
 
     def test_timeout_falls_back_then_succeeds(self):
         # ADR-15: timeout is transient (API_TIMEOUT_MS) -> try next profile, not fail-fast.
@@ -272,6 +295,18 @@ class TestRunWithFallback(unittest.TestCase):
         self.assertEqual(out.kind, "failed")
         self.assertEqual(out.reason, executor.MISSING_REPORT)
 
+    def test_phantom_trailer_without_file_is_missing_report(self):
+        # LS-021: a role prints the <<<REPORT>>> trailer but never writes the file
+        # (read-only blocked, or it just forgot). The trailer alone must NOT be accepted
+        # -> MISSING_REPORT (and STOP cleanly to page a human, not feed A a phantom report).
+        report = '<<<REPORT path="r.md" done="true">>>'
+        # report_abs=None -> backend does NOT materialize the file (phantom trailer)
+        be = ScriptBackend([RunResult(report, 0)], report_abs=None)
+        role = _role(["kiro-cli", "x"], [])
+        out = self._run(role, be)
+        self.assertEqual(out.kind, "failed")
+        self.assertEqual(out.reason, executor.MISSING_REPORT)
+
 
 class TestProfileShaping(unittest.TestCase):
     def test_cursor_argv_prompt_injected(self):
@@ -305,6 +340,7 @@ class TestProfileShaping(unittest.TestCase):
                     return RunResult("rate limit reached", 0)
                 captured["cmd"] = list(profile.cmd)
                 captured["stdin"] = prompt
+                Path(proj / "r.md").write_text("# report body", encoding="utf-8")   # LS-021: real file
                 return RunResult('<<<REPORT path="r.md" done="true">>>', 0)
 
         out = executor.run_with_fallback(
@@ -323,6 +359,7 @@ class TestProfileShaping(unittest.TestCase):
         class Chain:
             def run_once(self, profile, prompt, cwd, idle_timeout, hard_timeout, stop_re=None):
                 captured["arg0"] = profile.cmd[0]
+                Path(proj / "r.md").write_text("# report body", encoding="utf-8")   # LS-021: real file
                 return RunResult('<<<REPORT path="r.md" done="true">>>', 0)
 
         tmp = temporary_directory()

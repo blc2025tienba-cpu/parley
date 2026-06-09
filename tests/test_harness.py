@@ -36,6 +36,16 @@ class FakeBackend:
             dst = Path(cwd) / rel
             dst.parent.mkdir(parents=True, exist_ok=True)
             dst.write_text(content, encoding="utf-8")
+        # LS-021: a real role that emits a trailer also WRITES the report file. Parse
+        # REPORT_PATH from the role prompt and materialize it so the trailer is backed
+        # by a real file (else classify() -> MISSING_REPORT and the harness can't proceed).
+        if "<<<REPORT" in (self.role_output or ""):
+            m = re.search(r"REPORT_PATH:\s*(\S+)", prompt)
+            if m:
+                dst = Path(cwd) / m.group(1)
+                dst.parent.mkdir(parents=True, exist_ok=True)
+                if not dst.exists():
+                    dst.write_text("# report\nwork done\n", encoding="utf-8")
         return RunResult(self.role_output, 0)
 
 

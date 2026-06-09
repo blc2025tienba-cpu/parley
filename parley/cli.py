@@ -77,15 +77,17 @@ def default_roles() -> dict:
     fallbacks switch provider on quota/account errors, cursor as last resort."""
     def read_only(role: str, oc_primary: str | None = None) -> dict:
         # researcher/analyzer/architect: kiro -> claude 4.8 -> claude 4.7 -> cursor.
-        # LS-017: read-only roles MUST trust fs_read or kiro blocks on tool approval
-        # under --no-interactive ("Tool approval required"). fs_read = read/list/search
-        # files only; NOT execute_bash/fs_write (read-only stays read-only).
+        # LS-020 (hướng B): read-only roles cần GHI report file -> phải write-capable ở
+        # tầng CLI (kiro --trust-all-tools, claude --dangerously-skip-permissions, cursor
+        # --force). Ràng buộc "không sửa source" chuyển sang MỀM: SCOPE trong role prompt
+        # (context.role_prompt_document) + advisor review diff. Cờ role `edit` vẫn = False
+        # (harness không feed diff/verify như edit role), nhưng CLI được phép ghi.
         return {
-            "cmd": _KIRO + [role, "--trust-tools=fs_read"], "edit": False,
+            "cmd": _KIRO + [role, "--trust-all-tools"], "edit": False,
             "fallbacks": [
-                _claude_fb(_CLAUDE_AGENT[role], False, "claude-opus-4.8"),
-                _claude_fb(_CLAUDE_AGENT[role], False, "claude-opus-4.7"),
-                _cursor_fb(False),
+                _claude_fb(_CLAUDE_AGENT[role], True, "claude-opus-4.8"),
+                _claude_fb(_CLAUDE_AGENT[role], True, "claude-opus-4.7"),
+                _cursor_fb(True),
             ],
         }
 
@@ -93,14 +95,15 @@ def default_roles() -> dict:
         "analyzer":  read_only("analyzer"),
         "architect": read_only("architect"),
         "researcher": read_only("researcher"),
-        # reviewer: opencode plan/qwen3.7-max -> glm-5.1 -> qwen3.7-plus -> cursor thinking
+        # reviewer: read-only role nhưng cần GHI report (hướng B) -> opencode `build`
+        # (write-capable) thay vì `plan`. SCOPE prompt cấm sửa source.
         "reviewer": {
-            "cmd": ["opencode", "run", "--agent", "plan", "--model", "opencode-go/qwen3.7-max"],
+            "cmd": ["opencode", "run", "--agent", "build", "--model", "opencode-go/qwen3.7-max"],
             "edit": False,
             "fallbacks": [
-                _opencode_fb("plan", "opencode-go/glm-5.1"),
-                _opencode_fb("plan", "opencode-go/qwen3.7-plus"),
-                _cursor_fb(False),
+                _opencode_fb("build", "opencode-go/glm-5.1"),
+                _opencode_fb("build", "opencode-go/qwen3.7-plus"),
+                _cursor_fb(True),
             ],
         },
         # coder: opencode build/qwen3.7-plus -> minimax-m3 -> glm-5.1 -> cursor auto

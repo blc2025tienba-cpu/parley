@@ -58,6 +58,19 @@ Trạng thái: `OPEN` (chưa xử lý) · `FIXED` (đã sửa) · `MITIGATED` (g
 - **Phát hiện**: claude chạy 15ph im lặng, không phân biệt "đang chạy" vs "treo"; attempt log chỉ ghi SAU khi xong (0 byte nếu timeout).
 - **Sửa**: `backends._spawn(live_log=)` ghi stdout STREAMING ra `data_dir/live/<role>-<n>.log` (flush mỗi dòng) + header `# pid=... start=...` + footer `# end exit=...`. Executor truyền live_log mỗi attempt (qua `_run_once` an toàn với fake backend cũ). Endpoint `GET /goals/{gid}/live` trả last-line + mtime + pid mỗi attempt cho UI/curl tail real-time.
 
+### LS-020 · Read-only role không ghi được report file (FIXED 2026-06-10, hướng B)
+- **Phát hiện** (user test 3 provider): read-only mode (kiro `fs_read`, claude `plan`, cursor `plan`) cấm ghi file → role read-only không hoàn thành report-trailer protocol. Cả 3 provider đều không tạo được report.
+- **Sửa (hướng B — user chốt)**: cho read-only role (analyzer/architect/researcher/reviewer) **quyền ghi thật** ở tầng CLI: kiro `--trust-all-tools`, claude `--dangerously-skip-permissions`, cursor `--force`, reviewer opencode `plan→build`. Cưỡng chế read-only ở CLI bỏ; thay bằng **ràng buộc MỀM**: `context._scope_block()` thêm `# SCOPE` vào role prompt — read-only role CHỈ được ghi REPORT_PATH, CẤM sửa source; advisor review diff là lớp chặn. Cờ role `edit` vẫn False (harness không feed diff/verify như edit role). Prompt cũng yêu cầu đọc `AGENTS.md` đồng bộ contract.
+- **Đánh đổi**: an toàn chuyển từ cứng (CLI chặn) sang mềm (prompt + review). Read-only role kỹ thuật CÓ THỂ sửa source — chặn bằng SCOPE + advisor REJECT + git (chưa auto-commit khi chưa done).
+
+### LS-021 · Trailer giả được chấp nhận dù report file không tồn tại (FIXED 2026-06-10)
+- **Phát hiện** (user): `classify(has_trailer=True, file_changed=False) -> None` — role chỉ cần IN `<<<REPORT>>>` là success kể cả không ghi file → Advisor review report rỗng (`snapshot_path=None`).
+- **Sửa**: `classify(..., report_present)` — trailer chỉ hợp lệ khi file report **tồn tại + non-empty** (`executor.report_present()` check ở call site). Phantom trailer (trailer nhưng không file) → `MISSING_REPORT` → STOP sạch (không feed phantom cho Advisor).
+
+### LS-022 · `permission_denied` STOP → không fallback (FIXED 2026-06-10)
+- **Phát hiện** (user): kiro bị chặn ghi → `permission_denied` → STOP cứng, không thử claude/cursor.
+- **Sửa**: `_ACTION[PERMISSION_DENIED] = NEXT_PROFILE` (thử profile/mode kế; provider khác có thể ghi được). Gắn với LS-020: giờ mọi profile write-capable nên permission-denied hiếm hơn, nhưng nếu xảy ra thì fallback thay vì chết.
+
 ---
 
 ## Giảm thiểu (MITIGATED)
@@ -70,32 +83,6 @@ Trạng thái: `OPEN` (chưa xử lý) · `FIXED` (đã sửa) · `MITIGATED` (g
 ---
 
 ## Chưa xử lý (OPEN)
-
-### LS-020 · Read-only role KHÔNG thể ghi report file (mâu thuẫn kiến trúc) ⚠️ blocker
-- **Phát hiện** (user test thực tế 3 provider, goal_2859b601): read-only mode cấm ghi file → role read-only không hoàn thành được protocol report-trailer hiện tại.
-
-  | Provider read-only | Kết quả | Report file |
-  |---|---|---|
-  | Kiro `--trust-tools=fs_read` | Tool approval required, exit 1 | Không tạo |
-  | Claude `--permission-mode plan` | plan mode không cho ghi file, exit 0 | Không tạo |
-  | Cursor `--mode plan` | exit 0, không output | Không tạo |
-
-- **Bản chất**: protocol bắt MỌI role tự ghi report vào REPORT_PATH rồi đóng trailer. Nhưng analyzer/architect/researcher chạy read-only → KHÔNG có quyền `fs_write`. `--trust-tools=fs_read` (LS-017) chỉ giải quyết phần ĐỌC, không giải quyết phần GHI report.
-- **Đề xuất (user, đúng nhất)**:
-  1. Read-only role chỉ xuất report **qua stdout** (giữa trailer markers), KHÔNG ghi file.
-  2. **Parley tự ghi** nội dung report vào REPORT_PATH sau khi nhận stdout.
-  3. Chỉ role **edit** (coder/fixer) mới được yêu cầu ghi report file trực tiếp.
-  4. Phân biệt `permission_denied` do **report-write** (read-only role, nên fallback/đổi cách) với permission lỗi khi **đọc project** (thật sự STOP).
-- **Liên quan**: cần protocol mới cho read-only report (stdout-embedded). Đụng `context._EXEC_PROTO`, `executor.classify`, `harness` (ghi file thay role). Việc đáng kể — ADR riêng.
-
-### LS-021 · Trailer giả được chấp nhận dù report file không tồn tại
-- **Phát hiện** (user): `classify(has_trailer=True, file_changed=False) -> None` (success) ở `executor.py:135` — role chỉ cần IN ra `<<<REPORT ...>>>` là được coi thành công, kể cả khi KHÔNG ghi file.
-- **Hệ quả**: `snapshot_report()` sau đó lỗi (file không có) nhưng harness **nuốt exception** (`harness.py` try/except) → vẫn gửi report cho Advisor với `snapshot_path=None, sha256=None` → Advisor review một report rỗng.
-- **Cần**: trailer chỉ hợp lệ khi (a) file tồn tại + có nội dung, HOẶC (b) [sau LS-020] stdout chứa nội dung report thật. Không coi trailer trần là đủ. `done="true"` mà thiếu nội dung → `missing_report`.
-
-### LS-022 · `permission_denied` map STOP → không fallback khi bị chặn ghi
-- **Phát hiện** (user): kiro bị chặn ghi report → `permission_denied` → `_ACTION[PERMISSION_DENIED]=STOP` → KHÔNG thử claude/cursor. Nhưng đây là giới hạn read-only của provider, provider khác có thể cũng vậy (hoặc khác) → STOP cứng là sai khi nguyên nhân là report-write.
-- **Cần**: gắn với LS-020 — phân biệt permission-denied-đọc (STOP đúng) vs permission-denied-ghi-report (do thiết kế read-only; phải xử lý ở tầng protocol, không phải fallback provider).
 
 ### LS-007 · ADR-14 warm chưa live smoke thật
 - **Phát hiện**: 2 lần thử goal research đều không chạy tới warm turn (codex flaky + provider hết quota).

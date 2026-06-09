@@ -122,12 +122,32 @@ def advisor_reject_delta(progress, why) -> str:
     return "\n\n".join(_progress_block(progress) + [e, _NONCE_REMINDER])
 
 
+def _scope_block(edit: bool) -> str:
+    """SCOPE ràng buộc MỀM (hướng B): mọi role giờ chạy CLI write-capable (để ghi được
+    report file), nên cưỡng chế cứng read-only ở tầng CLI đã bỏ. SCOPE + advisor review
+    là lớp kiểm soát thay thế. Read-only role (analyzer/architect/researcher/reviewer)
+    CHỈ được ghi đúng REPORT_PATH; CẤM sửa/tạo bất kỳ file nào khác (source, config)."""
+    if edit:
+        return ("# SCOPE (role EDIT)\n"
+                "- Được phép tạo/sửa file source theo đúng SLICE + DIRECTIVE.\n"
+                "- GHI report vào đúng REPORT_PATH. Không đụng file ngoài phạm vi slice.")
+    return ("# SCOPE (role READ-ONLY — ràng buộc nghiêm)\n"
+            "- CHỈ được GHI đúng MỘT file: REPORT_PATH ở trên.\n"
+            "- TUYỆT ĐỐI KHÔNG sửa/tạo/xóa bất kỳ file nào khác (source .py/.js/.html, config, test).\n"
+            "- Bạn có quyền ghi ở tầng CLI, nhưng nhiệm vụ là KHẢO SÁT/PHÂN TÍCH rồi viết report.\n"
+            "- Sửa file ngoài REPORT_PATH = vi phạm scope, advisor sẽ REJECT.")
+
+
 def role_prompt_document(directive, contract, project_dir=None, contract_path=None,
-                         report_path=None, task_id=None) -> str:
+                         report_path=None, task_id=None, edit=False) -> str:
     rp = report_path or f"docs/reports/slice-{directive.slice}-{(directive.role or 'role')}-report.md"
     return (f"# PARLEY ROLE TASK\n"
             f"TASK_ID: {task_id}\nROLE: {directive.role}\nSLICE: {directive.slice}\n"
             f"PROJECT_DIR: {project_dir}\nCONTRACT: {contract_path}\nREPORT_PATH: {rp}\n\n"
+            f"{_scope_block(edit)}\n\n"
+            f"# DONG BO CONTRACT\n"
+            f"- Doc AGENTS.md (neu co o goc PROJECT_DIR) de nam quy uoc/contract chung truoc khi lam.\n"
+            f"- Doc CONTRACT CONTENT duoi day.\n\n"
             f"# ADVISOR DIRECTIVE\n{directive.prompt}\n\n"
             f"# CONTRACT CONTENT\n{contract or '(none)'}\n\n"
             f"{_EXEC_PROTO.format(RP=rp)}")

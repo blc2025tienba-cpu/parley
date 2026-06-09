@@ -81,7 +81,8 @@ _ACTION = {
     USAGE_EXHAUSTED: SKIP_PROVIDER,
     AUTH_ERROR: SKIP_PROVIDER,         # this provider can't auth; another might
     ACCOUNT_SUSPENDED: SKIP_PROVIDER,
-    PERMISSION_DENIED: STOP,           # task-specific; switching providers won't help
+    PERMISSION_DENIED: NEXT_PROFILE,   # LS-022: often a tool-write block on THIS provider/mode
+                                       # (kiro tool-approval, claude plan) -> next profile may write
     CLI_UNAVAILABLE: NEXT_PROFILE,
     TIMEOUT: NEXT_PROFILE,             # transient (API_TIMEOUT_MS): retry then next profile
     CLI_EXIT_ERROR: STOP,
@@ -126,14 +127,20 @@ def classify_text(stdout: str, exit_code: int, timed_out: bool) -> str | None:
 
 
 def classify(stdout: str, exit_code: int, timed_out: bool,
-             has_trailer: bool, file_changed: bool) -> str | None:
+             has_trailer: bool, file_changed: bool, report_present: bool = True) -> str | None:
     """Return None if the run produced a valid report; else a failure reason.
 
-    A valid report wins unconditionally (even done=false): if B wrote the trailer
-    or produced/changed the report file, that's signal, not failure.
+    A valid report = the report FILE actually exists with content, signalled either by
+    the trailer (has_trailer) or by a fresh/changed file (file_changed). LS-021: a trailer
+    alone is NOT enough — an LLM can print `<<<REPORT ...>>>` while never writing the file
+    (read-only blocked, or it just forgot). `report_present` (file exists, non-empty,
+    checked at the call site) gates the trailer so a fake trailer -> MISSING_REPORT and the
+    chain falls back instead of feeding the Advisor a phantom report.
     """
-    if has_trailer or file_changed:
+    if file_changed or (has_trailer and report_present):
         return None
+    if has_trailer and not report_present:
+        return MISSING_REPORT          # phantom trailer: claimed a report, wrote no file
     text = protocol.strip_ansi(stdout or "")
     # Signature scan first (see ordering note above).
     for reason, rx in _SIGNATURES:
@@ -168,6 +175,17 @@ def file_changed(before: tuple[bool, str | None], path: str) -> bool:
     if not existed:
         return True               # newly created
     return after_sha != before_sha
+
+
+def report_present(path: str) -> bool:
+    """LS-021: True only if the report file exists AND is non-empty (after strip).
+    Gates the trailer in classify() so a phantom <<<REPORT>>> (no file written) is
+    treated as MISSING_REPORT instead of a real report."""
+    try:
+        with open(path, "rb") as fh:
+            return len(fh.read().strip()) > 0
+    except (FileNotFoundError, OSError):
+        return False
 
 
 # ---- profile chain -----------------------------------------------------------
@@ -429,7 +447,9 @@ def run_with_fallback(role, role_cfg, backend, *, stdin_input, prompt_path,
             rep = protocol.parse_report(res.stdout)
             has_trailer = rep.path is not None
             changed = file_changed(before, report_abs)
-            reason = classify(res.stdout, res.exit_code, res.timed_out, has_trailer, changed)
+            present = report_present(report_abs)   # LS-021: gate phantom trailer
+            reason = classify(res.stdout, res.exit_code, res.timed_out, has_trailer, changed,
+                              report_present=present)
             _write_attempt_log(log_dir, role, n, prof, reason, res.stdout)
             excerpt = protocol.clean_excerpt(res.stdout)[:800]
             if reason is None:
