@@ -42,11 +42,21 @@ Tất cả thay đổi đáng chú ý của codebase Parley. Định dạng theo
   giữ bản audit ở data_dir. `.gitignore` chặn `.parley/`.
 - **Notify goal lẻ** (`notify._tick_push`): trước chỉ duyệt `contract.goal_ids` → goal chạy lẻ
   qua `/goals/{gid}/run` không bao giờ push Telegram. Nay union với `store.list_goals(pid)`.
+- **Kiro read-only roles trust-tools** (LS-017, `cli.default_roles`): analyzer/architect/researcher
+  cmd thêm `--trust-tools=fs_read` — trước thiếu nên kiro chặn ở "Tool approval required" dưới
+  `--no-interactive` khi role cần đọc/grep file. `fs_read` = read/list/search; KHÔNG fs_write/bash.
+- **Streaming live-log + pid** (LS-019, `backends._spawn`): mỗi spawn ghi stdout streaming ra
+  `data_dir/live/<role>-<n>.log` (header `# pid=...`, flush từng dòng) song song buffer in-memory;
+  endpoint `GET /goals/{gid}/live` trả last-line + mtime mỗi attempt → phân biệt "đang chạy" vs "treo"
+  (attempt log cũ chỉ ghi sau khi xong → 0 byte khi timeout, vô dụng để theo dõi).
+- **Task-split policy** (LS-018b, `context._POLICY`): hướng dẫn advisor chia dispatch theo phạm vi
+  hẹp đúng role (analyzer khảo sát codebase nội bộ → report; architect đọc report + nghiên cứu ngoài →
+  thiết kế), tránh gộp một dispatch khổng lồ vượt hard_timeout.
 
 ### Notes
-- ADR-13 và ADR-15 đã live smoke (parser/preflight/fallback/notify xác nhận thật). ADR-14 mới
-  verify bằng unit test (chưa live smoke do provider hết quota); `warm_until_task_done` cho role
+- ADR-13 và ADR-15 đã live smoke (parser/preflight/fallback/notify/trust-tools xác nhận thật). ADR-14
+  mới verify bằng unit test (chưa live smoke do provider hết quota); `warm_until_task_done` cho role
   B và ADR-16 (memory ledger / agentmemory) là đợt sau.
-- OPEN từ live smoke (BACKLOG): kiro read-only roles thiếu `--trust-tools=` (LS-017), claude opus
-  `-p` timeout 0-byte (LS-018), observability PID + live tail (LS-019).
-- Full unit suite: 160/160 xanh.
+- LS-018a (claude opus `-p` timeout 0-byte) là giới hạn môi trường: opus không stream partial, workload
+  reasoning lớn >hard_timeout → mất sạch output. Giảm thiểu bằng task-split + giữ hard_timeout 1800s.
+- Full unit suite: 161/161 xanh.

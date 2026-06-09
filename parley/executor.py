@@ -338,9 +338,33 @@ def _write_attempt_log(log_dir, role, n, prof, reason, stdout) -> None:
         pass
 
 
+def _live_log_path(log_dir, role, n) -> str | None:
+    """LS-019: path of the streaming live-log for one attempt (data_dir/live/<role>-<n>.log)."""
+    if not log_dir:
+        return None
+    try:
+        from pathlib import Path
+        d = Path(log_dir) / "live"
+        d.mkdir(parents=True, exist_ok=True)
+        return str(d / f"{role}-{n:02d}.log")
+    except Exception:
+        return None
+
+
+def _run_once(backend, cp, stdin, cwd, idle_timeout, hard_timeout, stop_re, live_log):
+    """Call backend.run_once, passing live_log only if the backend accepts it (real
+    GenericCliBackend does; test fakes with the old signature don't). Never fails over
+    a missing kwarg."""
+    try:
+        return backend.run_once(cp, stdin, cwd, idle_timeout, hard_timeout,
+                                stop_re=stop_re, live_log=live_log)
+    except TypeError:
+        return backend.run_once(cp, stdin, cwd, idle_timeout, hard_timeout, stop_re=stop_re)
+
+
 def _spawn_profile(backend, prof: Profile, role: str, stdin_input: str,
                    prompt_path: str | None, cursor_agent_path: str | None,
-                   cwd, idle_timeout, hard_timeout, stop_re):
+                   cwd, idle_timeout, hard_timeout, stop_re, live_log=None):
     cmd = list(prof.cmd)
     if prof.provider == "cursor" and cursor_agent_path:
         cmd[0] = cursor_agent_path
@@ -352,8 +376,8 @@ def _spawn_profile(backend, prof: Profile, role: str, stdin_input: str,
     cp = CommandProfile(cmd, role)
     if prof.provider == "opencode":
         with _opencode_lock:                       # SQLite WAL: never run two at once
-            return backend.run_once(cp, stdin, cwd, idle_timeout, hard_timeout, stop_re=stop_re)
-    return backend.run_once(cp, stdin, cwd, idle_timeout, hard_timeout, stop_re=stop_re)
+            return _run_once(backend, cp, stdin, cwd, idle_timeout, hard_timeout, stop_re, live_log)
+    return _run_once(backend, cp, stdin, cwd, idle_timeout, hard_timeout, stop_re, live_log)
 
 
 def run_with_fallback(role, role_cfg, backend, *, stdin_input, prompt_path,
@@ -399,7 +423,8 @@ def run_with_fallback(role, role_cfg, backend, *, stdin_input, prompt_path,
             n += 1
             before = file_sig(report_abs)
             res = _spawn_profile(backend, prof, role, stdin_input, prompt_path,
-                                 cursor_agent_path, cwd, idle_timeout, hard_timeout, stop_re)
+                                 cursor_agent_path, cwd, idle_timeout, hard_timeout, stop_re,
+                                 live_log=_live_log_path(log_dir, role, n))
             last_res = res
             rep = protocol.parse_report(res.stdout)
             has_trailer = rep.path is not None
@@ -480,7 +505,7 @@ def chain_from(primary_cmd: list, fallbacks: list) -> list[Profile]:
 
 
 def _warm_spawn(backend, prof, role, stdin_input, cwd, idle_timeout, hard_timeout,
-                session_id, warm_start_cmd, warm_resume_cmd):
+                session_id, warm_start_cmd, warm_resume_cmd, live_log=None):
     """Spawn the primary warm profile: resume_cmd (session exists) else start_cmd.
     Returns RunResult. No stop_re — warm needs full JSONL incl. turn.completed."""
     if session_id and warm_resume_cmd:
@@ -490,8 +515,8 @@ def _warm_spawn(backend, prof, role, stdin_input, cwd, idle_timeout, hard_timeou
     cp = CommandProfile(cmd, role)
     if prof.provider == "opencode":
         with _opencode_lock:
-            return backend.run_once(cp, stdin_input, cwd, idle_timeout, hard_timeout)
-    return backend.run_once(cp, stdin_input, cwd, idle_timeout, hard_timeout)
+            return _run_once(backend, cp, stdin_input, cwd, idle_timeout, hard_timeout, None, live_log)
+    return _run_once(backend, cp, stdin_input, cwd, idle_timeout, hard_timeout, None, live_log)
 
 
 def run_text_with_fallback(role, primary_cmd, fallbacks, backend, *, stdin_input,
@@ -547,15 +572,18 @@ def run_text_with_fallback(role, primary_cmd, fallbacks, backend, *, stdin_input
         max_att = max(1, prof.max_attempts)
         for att in range(1, max_att + 1):
             n += 1
+            live_log = _live_log_path(log_dir, role, n)
             if is_warm:
                 # delta prompt when resuming an existing session, else the full seed
                 this_stdin = (warm_stdin if (session_id and warm_stdin is not None)
                               else stdin_input)
                 res = _warm_spawn(backend, prof, role, this_stdin, cwd, idle_timeout,
-                                  hard_timeout, session_id, warm_start_cmd, warm_resume_cmd)
+                                  hard_timeout, session_id, warm_start_cmd, warm_resume_cmd,
+                                  live_log=live_log)
             else:
                 res = _spawn_profile(backend, prof, role, stdin_input, prompt_path,
-                                     cursor_agent_path, cwd, idle_timeout, hard_timeout, stop_re)
+                                     cursor_agent_path, cwd, idle_timeout, hard_timeout, stop_re,
+                                     live_log=live_log)
             last_res = res
             reason = classify_text(res.stdout, res.exit_code, res.timed_out)
             _write_attempt_log(log_dir, role, n, prof, reason, res.stdout)

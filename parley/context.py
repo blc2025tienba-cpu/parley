@@ -26,6 +26,11 @@ _POLICY = (
     "- Luong dien hinh: (analyzer/architect neu can) -> coder tao/sua file -> reviewer -> VERIFY -> COMPLETE.\n"
     "- Goal don gian (vd tao 1 file) co the dispatch thang coder.\n"
     "- Sau moi report/verify: danh gia & quyet buoc KE TIEP tien toi GOAL.\n"
+    "- MOI DISPATCH = MOT slice HEP, lam xong duoi ~10 phut. TUYET DOI khong gop nhieu viec lon vao\n"
+    "  mot dispatch (vd: 'khao sat ca codebase + nghien cuu repo ngoai + viet plan' -> B se timeout,\n"
+    "  mat sach output). Chia theo vai + pham vi: analyzer khao sat MOT vung code -> report; architect\n"
+    "  doc report + thiet ke -> plan; coder tao file. Moi B chi nhan dung phan cua no.\n"
+    "- Neu mot khao sat qua rong, chia thanh nhieu slice analyzer nho (theo module/file) roi tong hop.\n"
     "- CHI phat COMPLETE khi GOAL da THAT SU hoan thanh (file/thay doi can thiet da ton tai). "
     "TUYET DOI khong COMPLETE khi goal chua xong."
 )

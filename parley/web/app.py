@@ -456,6 +456,30 @@ def goal_tasks(gid: str, authorization: str = Header(default=""), token: str = "
     return project_tasks(events)
 
 
+@app.get("/goals/{gid}/live")
+def goal_live(gid: str, authorization: str = Header(default=""), token: str = ""):
+    """LS-019: tail the streaming live-logs of this goal's attempts. Returns each
+    attempt's pid header + last non-empty line + mtime so a watcher can tell
+    'working' from 'hung' while a CLI runs silently (the attempt .log only fills
+    after the process ends — useless for a 0-byte timeout)."""
+    _auth(authorization, token)
+    g = _goal_or_404(gid)
+    d = Path(g["data_dir"]) / "live"
+    out = []
+    if d.exists():
+        for f in sorted(d.glob("*.log")):
+            try:
+                lines = [l for l in f.read_text(encoding="utf-8").splitlines() if l.strip()]
+            except Exception:
+                continue
+            header = next((l for l in lines if l.startswith("# pid=")), "")
+            last = next((l for l in reversed(lines) if not l.startswith("#")), "")
+            out.append({"attempt": f.stem, "pid_header": header,
+                        "last_line": last[:300], "mtime": f.stat().st_mtime,
+                        "running": not any(l.startswith("# end") for l in lines)})
+    return {"attempts": out}
+
+
 @app.get("/goals/{gid}/config")
 def get_config(gid: str, authorization: str = Header(default=""), token: str = ""):
     _auth(authorization, token)

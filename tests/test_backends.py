@@ -29,6 +29,25 @@ class TestBackend(unittest.TestCase):
         self.assertFalse(res.timed_out)
         self.assertIn('<<<END nonce="zz">>>', res.stdout)
 
+    def test_live_log_streams_pid_and_lines(self):
+        # LS-019: when live_log is given, _spawn writes a pid header + every stdout
+        # line in real time, then an end footer — so a watcher can tail "last line".
+        from _util import temporary_directory
+        from pathlib import Path
+        tmp = temporary_directory()
+        self.addCleanup(tmp.cleanup)
+        log = str(Path(tmp.name) / "live.log")
+        b = GenericCliBackend()
+        prof = CommandProfile([sys.executable, "-c",
+                               "import sys;[print('line%d' % i, flush=True) for i in range(3)]"])
+        res = b.run_once(prof, "", None, 30, 60, live_log=log)
+        self.assertEqual(res.exit_code, 0)
+        text = Path(log).read_text(encoding="utf-8")
+        self.assertRegex(text, r"# pid=\d+")          # header carries the OS pid
+        self.assertIn("line0", text)
+        self.assertIn("line2", text)                  # every line streamed
+        self.assertIn("# end exit=0", text)           # footer on clean exit
+
     def test_verify_pass_then_fail(self):
         vr = SubprocessVerifyRunner()
         ok = vr.run([[sys.executable, "-c", "raise SystemExit(0)"]], None, 30)

@@ -66,23 +66,43 @@ def _resolve(cmd: list) -> list:
     return [exe, *cmd[1:]]
 
 
-def _spawn(cmd, stdin_text, idle_timeout, hard_timeout, cwd=None, stop_re=None) -> RunResult:
+def _spawn(cmd, stdin_text, idle_timeout, hard_timeout, cwd=None, stop_re=None,
+           live_log=None) -> RunResult:
     """Spawn cmd, feed stdin, stream stdout.
 
     Stops (kills) when: a line matches stop_re (normal completion — process needn't exit),
     or idle>idle_timeout / total>hard_timeout (timed_out=True).
-    """
+
+    LS-019: when `live_log` (a path) is given, every stdout line is appended+flushed there
+    in real time, prefixed with a header carrying the OS pid. A watcher (notify/UI) can tail
+    this file to see the last line + mtime and tell "working" from "hung" — the in-memory buf
+    only materializes after the process ends (useless for a 0-byte timeout)."""
     p = subprocess.Popen(_resolve(cmd), stdin=subprocess.PIPE, stdout=subprocess.PIPE,
                          stderr=subprocess.STDOUT, text=True, encoding="utf-8",
                          errors="replace", cwd=cwd)
     buf, last = [], [time.time()]
     stop_hit = threading.Event()
+    lf = None
+    if live_log:
+        try:
+            lf = open(live_log, "w", encoding="utf-8", newline="\n")
+            lf.write(f"# pid={p.pid} start={time.strftime('%Y-%m-%dT%H:%M:%S')} "
+                     f"cmd={' '.join(str(c) for c in cmd[:3])}\n")
+            lf.flush()
+        except Exception:
+            lf = None
 
     def reader():
         assert p.stdout is not None
         for line in p.stdout:
             buf.append(line)
             last[0] = time.time()
+            if lf is not None:
+                try:
+                    lf.write(line)
+                    lf.flush()
+                except Exception:
+                    pass
             if stop_re is not None and stop_re.search(line):
                 stop_hit.set()
                 break
@@ -116,6 +136,13 @@ def _spawn(cmd, stdin_text, idle_timeout, hard_timeout, cwd=None, stop_re=None) 
             p.stdout.close()
     except Exception:
         pass
+    if lf is not None:
+        try:
+            lf.write(f"# end exit={p.poll()} timed_out={timed_out} "
+                     f"at={time.strftime('%Y-%m-%dT%H:%M:%S')}\n")
+            lf.close()
+        except Exception:
+            pass
     code = p.poll()
     return RunResult("".join(buf), code if code is not None else -1, timed_out)
 
@@ -124,8 +151,9 @@ class GenericCliBackend:
     """stateless stdin/stdout one-shot — phù hợp codex exec + kiro-cli --no-interactive."""
 
     def run_once(self, profile: CommandProfile, prompt: str, cwd: str | None,
-                 idle_timeout: int, hard_timeout: int, stop_re=None) -> RunResult:
-        return _spawn(profile.cmd, prompt, idle_timeout, hard_timeout, cwd=cwd, stop_re=stop_re)
+                 idle_timeout: int, hard_timeout: int, stop_re=None, live_log=None) -> RunResult:
+        return _spawn(profile.cmd, prompt, idle_timeout, hard_timeout, cwd=cwd,
+                      stop_re=stop_re, live_log=live_log)
 
 
 class SubprocessVerifyRunner:

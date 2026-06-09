@@ -46,6 +46,18 @@ Trạng thái: `OPEN` (chưa xử lý) · `FIXED` (đã sửa) · `MITIGATED` (g
 - **Nguyên nhân**: `write_prompt` ghi vào `data_dir` (`~/.parley/data/...`) NGOÀI project_dir; claude/cursor sandbox chỉ đọc trong workspace. Report files dùng path relative project_dir nên không bị (bất đối xứng).
 - **Sửa**: `write_prompt(.., project_dir=)` materialize prompt vào `<project_dir>/.parley/prompts/` (trong workspace) và trả path đó cho executor; vẫn giữ bản audit ở data_dir. `.gitignore` chặn `.parley/`. Live verify: kiro đọc được ("Successfully read 1213 bytes").
 
+### LS-017 · Kiro read-only roles thiếu `--trust-tools=` → chết khi cần tool (FIXED 2026-06-10)
+- **Phát hiện**: live smoke goal_2859b601 — analyzer (kiro) đọc được prompt rồi chết: `error: Tool approval required but --no-interactive was specified`. Read-only roles cần `fs_read`/grep để khảo sát nhưng cmd thiếu trust → chặn (chết KỂ CẢ khi không rate-limit).
+- **Sửa**: `default_roles()` read-only (analyzer/architect/researcher) cmd thêm `--trust-tools=fs_read` — chỉ đọc/list/search file, KHÔNG `execute_bash`/`fs_write` (read-only role giữ read-only). Coder/fixer (edit, dùng opencode) không đụng.
+
+### LS-018 · Claude opus `-p` timeout 0-byte + task scope quá rộng (FIXED 2026-06-10)
+- **Phát hiện**: analyzer-02/03-claude-opus = 0 byte/timeout. Opus `-p` không stream; task gộp (khảo sát codebase 4093 dòng + nghiên cứu repo ngoài + plan) >15ph → hard_timeout kill trước khi in → mất sạch.
+- **Sửa**: (a) giữ `hard_timeout` mặc định 1800s (không tự cap 900s như smoke trước); (b) `_POLICY` (context.py) siết advisor CHIA task hẹp đúng role — analyzer chỉ khảo sát nội bộ, architect nghiên cứu+thiết kế, không gộp; mỗi dispatch đủ nhỏ để in report trước timeout. Streaming live-log (LS-019) cho partial output khi bị kill.
+
+### LS-019 · Observability: PID + live streaming log (FIXED 2026-06-10)
+- **Phát hiện**: claude chạy 15ph im lặng, không phân biệt "đang chạy" vs "treo"; attempt log chỉ ghi SAU khi xong (0 byte nếu timeout).
+- **Sửa**: `backends._spawn(live_log=)` ghi stdout STREAMING ra `data_dir/live/<role>-<n>.log` (flush mỗi dòng) + header `# pid=... start=...` + footer `# end exit=...`. Executor truyền live_log mỗi attempt (qua `_run_once` an toàn với fake backend cũ). Endpoint `GET /goals/{gid}/live` trả last-line + mtime + pid mỗi attempt cho UI/curl tail real-time.
+
 ---
 
 ## Giảm thiểu (MITIGATED)
@@ -59,24 +71,35 @@ Trạng thái: `OPEN` (chưa xử lý) · `FIXED` (đã sửa) · `MITIGATED` (g
 
 ## Chưa xử lý (OPEN)
 
+### LS-020 · Read-only role KHÔNG thể ghi report file (mâu thuẫn kiến trúc) ⚠️ blocker
+- **Phát hiện** (user test thực tế 3 provider, goal_2859b601): read-only mode cấm ghi file → role read-only không hoàn thành được protocol report-trailer hiện tại.
+
+  | Provider read-only | Kết quả | Report file |
+  |---|---|---|
+  | Kiro `--trust-tools=fs_read` | Tool approval required, exit 1 | Không tạo |
+  | Claude `--permission-mode plan` | plan mode không cho ghi file, exit 0 | Không tạo |
+  | Cursor `--mode plan` | exit 0, không output | Không tạo |
+
+- **Bản chất**: protocol bắt MỌI role tự ghi report vào REPORT_PATH rồi đóng trailer. Nhưng analyzer/architect/researcher chạy read-only → KHÔNG có quyền `fs_write`. `--trust-tools=fs_read` (LS-017) chỉ giải quyết phần ĐỌC, không giải quyết phần GHI report.
+- **Đề xuất (user, đúng nhất)**:
+  1. Read-only role chỉ xuất report **qua stdout** (giữa trailer markers), KHÔNG ghi file.
+  2. **Parley tự ghi** nội dung report vào REPORT_PATH sau khi nhận stdout.
+  3. Chỉ role **edit** (coder/fixer) mới được yêu cầu ghi report file trực tiếp.
+  4. Phân biệt `permission_denied` do **report-write** (read-only role, nên fallback/đổi cách) với permission lỗi khi **đọc project** (thật sự STOP).
+- **Liên quan**: cần protocol mới cho read-only report (stdout-embedded). Đụng `context._EXEC_PROTO`, `executor.classify`, `harness` (ghi file thay role). Việc đáng kể — ADR riêng.
+
+### LS-021 · Trailer giả được chấp nhận dù report file không tồn tại
+- **Phát hiện** (user): `classify(has_trailer=True, file_changed=False) -> None` (success) ở `executor.py:135` — role chỉ cần IN ra `<<<REPORT ...>>>` là được coi thành công, kể cả khi KHÔNG ghi file.
+- **Hệ quả**: `snapshot_report()` sau đó lỗi (file không có) nhưng harness **nuốt exception** (`harness.py` try/except) → vẫn gửi report cho Advisor với `snapshot_path=None, sha256=None` → Advisor review một report rỗng.
+- **Cần**: trailer chỉ hợp lệ khi (a) file tồn tại + có nội dung, HOẶC (b) [sau LS-020] stdout chứa nội dung report thật. Không coi trailer trần là đủ. `done="true"` mà thiếu nội dung → `missing_report`.
+
+### LS-022 · `permission_denied` map STOP → không fallback khi bị chặn ghi
+- **Phát hiện** (user): kiro bị chặn ghi report → `permission_denied` → `_ACTION[PERMISSION_DENIED]=STOP` → KHÔNG thử claude/cursor. Nhưng đây là giới hạn read-only của provider, provider khác có thể cũng vậy (hoặc khác) → STOP cứng là sai khi nguyên nhân là report-write.
+- **Cần**: gắn với LS-020 — phân biệt permission-denied-đọc (STOP đúng) vs permission-denied-ghi-report (do thiết kế read-only; phải xử lý ở tầng protocol, không phải fallback provider).
+
 ### LS-007 · ADR-14 warm chưa live smoke thật
 - **Phát hiện**: 2 lần thử goal research đều không chạy tới warm turn (codex flaky + provider hết quota).
 - **Cần**: provider hồi quota → chạy goal nhiều turn, xác nhận turn-2 token (warm delta) < turn-1 (cold seed), `session_ref` giữ qua turn, force-cold đúng khi chạm `max_warm_turns_per_phase`.
-
-### LS-017 · Kiro read-only roles thiếu `--trust-tools=` → chết khi cần tool
-- **Phát hiện**: live smoke goal_2859b601 — analyzer (kiro) đọc được prompt, nhưng khi cần tool: `error: Tool approval required but --no-interactive was specified. Use --trust-all-tools`.
-- **Nguyên nhân**: `default_roles()` analyzer/architect/researcher cmd = `kiro-cli chat --no-interactive --agent <role>` — KHÔNG có `--trust-tools=`/`--trust-all-tools`. Supervisor có `--trust-tools=` (judge không cần tool); read-only roles cần `fs_read`/grep để khảo sát → bị chặn. Sẽ chết KỂ CẢ khi không rate-limit.
-- **Cần (quyết định bảo mật)**: read-only roles chỉ cần đọc → thêm `--trust-tools=fs_read` (hoặc tool an toàn cụ thể), KHÔNG `--trust-all-tools` (read-only role không nên ghi/shell). Coder/fixer (edit) cần scope rộng hơn — đã có chain riêng. Cần chốt tool-set cho từng tier.
-
-### LS-018 · Claude opus `-p` timeout 0-byte với workload reasoning lớn
-- **Phát hiện**: live smoke — analyzer-02/03-claude-opus-4.8 = 0 byte, reason=timeout. Opus `-p` không stream, reasoning (phân tích cả codebase + repo ngoài) >15ph → hard_timeout 900s kill trước khi in → 0 byte → missing_report → chain claude tiếp.
-- **Bản chất**: giới hạn thời gian/tài nguyên + opus không stream từng phần. Không phải lỗi logic.
-- **Cần cân nhắc**: (a) tăng hard_timeout cho read-only analysis role; (b) `--output-format stream-json` nếu claude hỗ trợ để có partial output (gắn với LS-019 observability); (c) chia nhỏ task analyzer.
-
-### LS-019 · Thiếu observability cho process task đang chạy (PID + live tail)
-- **Phát hiện**: khi claude chạy 15ph im lặng, không phân biệt được "đang làm việc" vs "treo"; attempt log chỉ ghi SAU khi xong (0 byte nếu timeout → vô dụng để theo dõi live). UI fallback không show pid.
-- **Đề xuất (user)**: nhận dạng mỗi process qua **PID** + emit lên event; **ghi temp log streaming** mỗi process; **tail log → UI show last-line + timestamp** để theo dõi real-time.
-- **Cần**: sửa `backends._spawn` ghi stdout streaming ra temp file (không chỉ buffer in-memory); emit `pid` trong dispatch/fallback event; notify/UI đọc tail. Việc đáng kể, làm riêng.
 
 ### LS-009 · Prompt tiếng Việt bị mojibake trong stdin codex
 - **Phát hiện**: raw log advisor — `Khảo sát` → `Kháº£o sÃ¡t` trong stdin codex (encoding Windows).

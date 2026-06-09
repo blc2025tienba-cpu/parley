@@ -76,9 +76,12 @@ def default_roles() -> dict:
     """ADR-15 verified routing. Primary = kiro (read-only roles) / opencode (code roles);
     fallbacks switch provider on quota/account errors, cursor as last resort."""
     def read_only(role: str, oc_primary: str | None = None) -> dict:
-        # researcher/analyzer/architect: kiro -> claude 4.8 -> claude 4.7 -> cursor
+        # researcher/analyzer/architect: kiro -> claude 4.8 -> claude 4.7 -> cursor.
+        # LS-017: read-only roles MUST trust fs_read or kiro blocks on tool approval
+        # under --no-interactive ("Tool approval required"). fs_read = read/list/search
+        # files only; NOT execute_bash/fs_write (read-only stays read-only).
         return {
-            "cmd": _KIRO + [role], "edit": False,
+            "cmd": _KIRO + [role, "--trust-tools=fs_read"], "edit": False,
             "fallbacks": [
                 _claude_fb(_CLAUDE_AGENT[role], False, "claude-opus-4.8"),
                 _claude_fb(_CLAUDE_AGENT[role], False, "claude-opus-4.7"),
